@@ -1,0 +1,11 @@
+/* TEMPORARY — validation only. Routes the console to the native USB-Serial/JTAG
+ * (the same port you flash over, /dev/ttyACM0). Remove before measuring I_sleep. */
+/ {
+	chosen {
+		zephyr,console = &usb_serial;
+	};
+};
+
+&usb_serial {
+	status = "okay";
+};

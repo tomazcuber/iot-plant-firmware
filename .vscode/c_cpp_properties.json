@@ -1,0 +1,18 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${env:HOME}/Projects/zephyr-workspace/zephyr/include/**",
+                "${workspaceFolder}/build/zephyr/include/generated/**"
+            ],
+            "defines": [],
+            "compilerPath": "${env:HOME}/zephyr-sdk-0.16.8/riscv64-zephyr-elf/bin/riscv64-zephyr-elf-gcc",
+            "cStandard": "c17",
+            "cppStandard": "gnu++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
