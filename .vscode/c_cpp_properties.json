@@ -1,17 +1,18 @@
 {
     "configurations": [
         {
-            "name": "Linux",
+            "name": "Zephyr (Windows)",
+            "compileCommands": "C:/zw/build/compile_commands.json",
             "includePath": [
-                "${workspaceFolder}/**",
-                "${env:HOME}/Projects/zephyr-workspace/zephyr/include/**",
-                "${workspaceFolder}/build/zephyr/include/generated/**"
+                "${workspaceFolder}/apps/**",
+                "C:/zw/zephyr/include",
+                "C:/zw/build/zephyr/include/generated"
             ],
             "defines": [],
-            "compilerPath": "${env:HOME}/zephyr-sdk-0.16.8/riscv64-zephyr-elf/bin/riscv64-zephyr-elf-gcc",
+            "compilerPath": "C:/Users/Tomaz/zephyr-sdk-0.17.4/riscv64-zephyr-elf/bin/riscv64-zephyr-elf-gcc.exe",
             "cStandard": "c17",
             "cppStandard": "gnu++17",
-            "intelliSenseMode": "linux-gcc-x64"
+            "intelliSenseMode": "gcc-x64"
         }
     ],
     "version": 4
