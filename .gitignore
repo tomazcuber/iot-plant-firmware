@@ -6,3 +6,6 @@ build/
 
 # credentials — never commit
 apps/active-wifi/credentials.conf
+
+# local issue tracker
+.scratch/
