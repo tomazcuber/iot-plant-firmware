@@ -1,3 +1,10 @@
 {
-    "cmake.sourceDirectory": "/home/tomazcuber/Projects/zephyr-workspace/iot-plant-firmware/apps/main"
+    "cmake.sourceDirectory": "${workspaceFolder}/apps/static-sleep",
+    "cmake.buildDirectory": "C:/zw/build",
+    "cmake.configureOnOpen": false,
+    "C_Cpp.default.configurationProvider": "",
+    "files.associations": {
+        "*.overlay": "dts",
+        "*.dtsi": "dts"
+    }
 }
