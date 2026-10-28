@@ -1,0 +1,25 @@
+mainmenu "Plant Monitor — Main Application"
+
+menu "Soil Moisture Calibration"
+
+config SOIL_DRY_ADC
+	int "Raw ADC value with probe in dry air"
+	default 3000
+	help
+	  Raw ADC reading measured with the soil moisture probe in dry air.
+	  Upper reference for the two-point linear calibration curve.
+	  Must be characterised per-probe (see DD-MA-12) — the default is a
+	  placeholder for the YL-69 / HW-080 sensor family at 3.3V VCC and
+	  must be updated for the specific probe used in the deployment.
+
+config SOIL_WET_ADC
+	int "Raw ADC value with probe fully submerged"
+	default 1500
+	help
+	  Raw ADC reading measured with the soil moisture probe fully
+	  submerged in water. Lower reference for the two-point linear
+	  calibration curve. Must be characterised per-probe (see DD-MA-12).
+
+endmenu
+
+source "Kconfig.zephyr"
