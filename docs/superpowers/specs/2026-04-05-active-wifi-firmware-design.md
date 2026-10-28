@@ -3,7 +3,14 @@
 **Project:** IoT Plant Monitoring — Bachelor's Thesis  
 **Firmware:** `apps/active-wifi`  
 **Date:** 2026-04-05  
-**Status:** Approved
+**Status:** Revised (2026-10-15): repurposed as comparison baseline A; requirement rewrite pending
+
+> **Change of role.** With the INA219 bench, I_wifi and t_wifi are obtained from the current trace of the `main` firmware itself, which also removes the warm-versus-cold reconnect approximation acknowledged in DD-AW-03. This firmware therefore no longer characterises I_wifi. It is repurposed as **comparison baseline A**: the naive always-connected pattern reported in the literature (Wi-Fi kept associated, read–publish–wait loop, no sleep), as in Shin et al. (2024), Pamudji et al. (2026) and the no-sleep condition of Dzahir and Chia (2023).
+>
+> Changes required before measurement (not yet applied to the requirements below):
+> - FR-AW-01 and DD-AW-03: replace the reconnect loop with a persistent connection (connect once, then read, publish and wait in a loop). The implementation plan's Task 5 code already follows this structure.
+> - FR-AW-03: read the real sensors in the same order as `main` (FR-MA-07, step 3) instead of publishing a dummy payload, so the workload matches. This requires an `app.overlay` with the sensor nodes, which NFR-AW-04 currently rules out.
+> - Publication interval: equal to the `main` firmware's `read_interval_s` for each interval in the experiment matrix, instead of 1 s.
 
 ---
 
@@ -12,7 +19,7 @@
 The active WiFi firmware repeatedly connects to WiFi, publishes one MQTT message, disconnects, and immediately reconnects — mirroring the per-cycle behaviour of the main firmware. Its sole purpose is to provide a stable, measurable baseline WiFi-phase current (I_wifi) using a multimeter. This value feeds directly into the thesis energy model:
 
 ```
-E_cycle = (I_sleep × t_sleep + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V
+E_cycle = (I_sleep × t_sleep + I_boot × t_boot + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V
 ```
 
 This firmware contains no real sensor reads and no sleep logic.
@@ -104,21 +111,24 @@ CONFIG_MQTT_LIB=y
 
 ## Measurement Procedure
 
-This procedure shall be documented in the thesis methodology chapter.
+This procedure shall be documented in the thesis methodology chapter. Revised 2026-10-15: it measures this firmware as comparison baseline A.
 
-1. Assemble the **complete main firmware hardware configuration** on the protoboard: ESP32-C6-DevKitC-1 with HDC1080, BMP280, BH1750FVI, and the resistive soil moisture sensor (with its onboard LM393 comparator module) all physically connected. Sensors are not read by this firmware but must be present so the measured current matches the main firmware's WiFi-phase hardware state.
-2. Set WiFi credentials and MQTT broker address in `apps/active-wifi/credentials.conf` (gitignored; see FR-AW-05).
-3. Flash `apps/active-wifi` to the ESP32-C6-DevKitC-1.
-4. Connect a multimeter in series with the 5V USB VCC line.
-5. Set multimeter to DC current mode (mA range).
-6. Power the board. Allow 30 seconds for the reconnect loop to reach a steady cadence.
-7. Record the stable current reading as **I_wifi**.
-8. Power source voltage during measurement: **V = 5V** (USB).
+### Bench
 
-> **Note:** The tight reconnect loop causes the current to oscillate between a high transient (during WiFi association and MQTT handshake) and a lower level (during publish and disconnect). The multimeter averages across these phases — this average is exactly the `I_wifi` the energy model requires. Do not treat the oscillating reading as instability; it is the correct operating state.
+- Board under test: MuseLab nanoESP32-C6, with the HDC1080, BMP280, BH1750FVI and the resistive soil moisture sensor (with its LM393 comparator module) connected and powered as in deployment.
+- Power: a second board connected to the computer by USB acts as the 5 V source. The board under test is powered only through its 5 V pin, via the measurement path. All grounds are common.
+- Neither USB-C port of the board under test may be connected during a measurement: a USB cable would power the board directly and bypass the measurement path. Connect USB only to flash, then disconnect it.
+- Power source voltage: V = 5 V.
 
-> **Measurement validity:** The reconnect loop should settle into a consistent cadence within 30 seconds. If the reading drifts continuously or the board appears stuck (no reconnect activity visible on the MQTT broker), investigate the network/broker and resolve before recording. The cadence will be faster on a strong network and slower on a marginal one — record I_wifi only at the intended deployment RF environment if possible.
+### Steps
 
+1. Configure the publication interval for the condition under test, flash `apps/active-wifi` and disconnect USB.
+2. Insert the INA219 in series in the 5 V line. Log at the same sampling settings used for the `main` trace.
+3. Power the board and wait for the first publication on the broker.
+4. Log at least 10 complete publication cycles per run; repeat three runs per condition.
+5. Record the mean current over an integer number of cycles as **I_A**, and energy per cycle as I_A × V × interval.
+6. From the same trace, record the mean current between publications as **I_wifi,idle** (Wi-Fi associated, no traffic). This term is needed to express baseline A in the energy model, which otherwise has no state for an associated but idle radio.
+7. Sanity check: the reduction from baseline A to `main` with `ble_window_s` = 0 at a 60 s interval should fall near the 72–83% range reported by Mayo et al. (2026), Dzahir and Chia (2023) and Smyrilios et al. (2025). A result far outside that range points to a bench or firmware problem.
 ---
 
 ## Design Decisions

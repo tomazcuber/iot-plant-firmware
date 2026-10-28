@@ -3,16 +3,16 @@
 **Project:** IoT Plant Monitoring — Bachelor's Thesis  
 **Firmware:** `apps/active-ble`  
 **Date:** 2026-04-05  
-**Status:** Approved
+**Status:** Approved (role and measurement procedure revised 2026-10-15)
 
 ---
 
 ## Purpose
 
-The active BLE firmware keeps the ESP32-C6 continuously active with its BLE stack advertising. Its sole purpose is to provide a stable, measurable baseline BLE active current (I_ble) using a multimeter. This value feeds directly into the thesis energy model:
+The active BLE firmware keeps the ESP32-C6 continuously active with its BLE stack advertising. Its purpose is to provide a long, steady BLE advertising state in which I_ble can be measured reliably. Since 2026-10-15 the primary source of I_ble is the INA219 trace of the `main` firmware's BLE phase; this firmware is the cross-check. Advertising events are sub-millisecond bursts that a trace sampled at about 1 kHz can alias, while a long steady state lets the INA219's hardware averaging integrate them. This value feeds directly into the thesis energy model:
 
 ```
-E_cycle = (I_sleep × t_sleep + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V
+E_cycle = (I_sleep × t_sleep + I_boot × t_boot + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V
 ```
 
 This firmware contains no sensor reads, no WiFi, and no sleep logic.
@@ -78,18 +78,24 @@ CONFIG_LOG_DEFAULT_LEVEL=2
 
 ## Measurement Procedure
 
-This procedure shall be documented in the thesis methodology chapter.
+This procedure shall be documented in the thesis methodology chapter. Revised 2026-10-15 for the INA219 bench.
 
-1. Assemble the **complete main firmware hardware configuration** on the protoboard: ESP32-C6-DevKitC-1 with HDC1080, BMP280, BH1750FVI, and the resistive soil moisture sensor (with its onboard LM393 comparator module) all physically connected. Sensors are not read by this firmware but must be present so the measured current matches the main firmware's BLE-phase hardware state.
-2. Flash `apps/active-ble` to the ESP32-C6-DevKitC-1.
-3. Connect a multimeter in series with the 5V USB VCC line.
-4. Set multimeter to DC current mode (mA range).
-5. Power the board. Allow 5 seconds for the firmware to boot and begin advertising.
-6. Record the stable current reading as **I_ble**.
-7. Power source voltage during measurement: **V = 5V** (USB).
+### Bench
 
-> **Note:** BLE advertising current is significantly lower than WiFi TX current and will show small periodic spikes at the advertising interval. Record the average stable value. A multimeter with averaging capability is preferred.
+- Board under test: MuseLab nanoESP32-C6, with the HDC1080, BMP280, BH1750FVI and the resistive soil moisture sensor (with its LM393 comparator module) connected and powered as in deployment.
+- Power: a second board connected to the computer by USB acts as the 5 V source. The board under test is powered only through its 5 V pin, via the measurement path. All grounds are common.
+- Neither USB-C port of the board under test may be connected during a measurement: a USB cable would power the board directly and bypass the measurement path. Connect USB only to flash, then disconnect it.
+- Power source voltage: V = 5 V.
 
+### Steps
+
+1. Flash `apps/active-ble` and disconnect USB.
+2. Insert the INA219 in series in the 5 V line. Configure it for hardware averaging (128 samples per reading, about 68 ms per result at 12-bit resolution), so that each reading integrates many advertising events.
+3. Power the board. Wait 5 seconds for advertising to start, then log for 60 s. Record the mean as **I_ble**. Repeat three times.
+4. Cross-check: put the multimeter in the same position; its stable reading shall agree with the INA219 mean.
+5. Compare I_ble with the mean current of the BLE phase in the `main` trace (`ble_window_s` > 0, no client connected). If they disagree by more than the INA219 resolution, report both and use this firmware's value in the energy model, since the steady state is the more reliable measurement.
+
+> **Note:** The advertising interval shall match the `main` firmware's (FR-AB-02); otherwise the comparison in step 5 is invalid.
 ---
 
 ## Design Decisions
