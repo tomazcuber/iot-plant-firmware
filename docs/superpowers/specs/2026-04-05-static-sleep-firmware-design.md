@@ -3,7 +3,7 @@
 **Project:** IoT Plant Monitoring — Bachelor's Thesis  
 **Firmware:** `apps/static-sleep`  
 **Date:** 2026-04-05  
-**Status:** Approved
+**Status:** Approved (measurement procedure revised 2026-10-15 for the INA219 bench)
 
 ---
 
@@ -12,10 +12,10 @@
 The static sleep firmware keeps the ESP32-C6 in permanent deep sleep. Its sole purpose is to provide a stable, measurable baseline sleep current (I_sleep) using a multimeter. This value feeds directly into the thesis energy model:
 
 ```
-E_cycle = (I_sleep × t_sleep + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V
+E_cycle = (I_sleep × t_sleep + I_boot × t_boot + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V
 ```
 
-I_wifi and I_ble are measured by the `active-wifi` and `active-ble` baseline firmwares respectively.
+I_boot, I_sensor, I_wifi and I_ble, and the phase durations, are obtained from the INA219 current trace of the `main` firmware (see the main firmware PRD, Measurement Procedure). I_sleep remains a separate measurement because the INA219 module (0.1 Ω shunt, about 0.1 mA resolution) cannot resolve the sleep floor accurately.
 
 This firmware contains no application logic.
 
@@ -71,18 +71,25 @@ CONFIG_PM_DEVICE=y
 
 ## Measurement Procedure
 
-This procedure shall be documented in the thesis methodology chapter.
+This procedure shall be documented in the thesis methodology chapter. Revised 2026-10-15: the active phases are now measured with an INA219; the sleep current of this firmware is still measured primarily with the multimeter.
 
-1. Assemble the **complete main firmware hardware configuration** on the protoboard: ESP32-C6-DevKitC-1 with HDC1080, BMP280, BH1750FVI, and the resistive soil moisture sensor (with its onboard LM393 comparator module) all physically connected and powered as they would be in a real deployment.
-2. Flash `apps/static-sleep` to the ESP32-C6-DevKitC-1.
-3. Connect a multimeter in series with the 5V USB VCC line (between USB power source and board VBUS pin).
-4. Set multimeter to DC current mode (mA range).
-5. Power the board. Allow 5 seconds for the firmware to boot and enter deep sleep.
-6. Record the stable current reading as **I_sleep**.
-7. Power source voltage during measurement: **V = 5V** (USB).
+### Bench
 
-> **Note:** The DevKitC-1 has an onboard LDO regulator. The measured I_sleep includes the LDO's quiescent current (~50–100 µA), the I2C sensors' idle current (~1–10 µA each), and the LM393 comparator module's continuous draw (~1–2 mA). This is intentional — I_sleep represents the true system-level sleep current of the deployed configuration, not the bare MCU current. The dominant contributor is typically the LM393 module; this should be noted explicitly in the thesis methodology.
+- Board under test: MuseLab nanoESP32-C6, with the HDC1080, BMP280, BH1750FVI and the resistive soil moisture sensor (with its LM393 comparator module) connected and powered as in deployment.
+- Power: a second board connected to the computer by USB acts as the 5 V source. The board under test is powered only through its 5 V pin, via the measurement path. All grounds are common.
+- Neither USB-C port of the board under test may be connected during a measurement: a USB cable would power the board directly and bypass the measurement path. Connect USB only to flash, then disconnect it.
+- Power source voltage: V = 5 V.
 
+### Steps
+
+1. Flash `apps/static-sleep` and disconnect USB.
+2. Insert the multimeter in series in the 5 V line (DC current, mA range), with a jumper wire shorting the multimeter terminals.
+3. Power the board. Wait 5 seconds for the firmware to boot and enter deep sleep, then remove the jumper. The board draws tens of mA while booting, and the multimeter's burden voltage on low ranges can brown it out; the jumper carries the boot current.
+4. Record the stable reading as **I_sleep**. Repeat three times, power-cycling between runs, and report the mean.
+5. Cross-check: put the INA219 in the same position and log for 60 s. Its mean shall agree with the multimeter within the INA219 resolution.
+6. Variant without the comparator: repeat steps 3 and 4 with the LM393 module's VCC disconnected and record **I_sleep,noLM393**. The difference quantifies the standby cost of event-driven wake (DD-MA-01 in the main firmware PRD): the LM393 output is the GPIO wake source, so the module must stay powered in deployment.
+
+> **Note:** I_sleep is the system-level floor of the nanoESP32-C6 configuration. It includes the board's regulator, its USB-to-serial converter (CH343) and RGB LED quiescent current, the I2C sensors' idle current and the LM393 module's continuous draw (about 1–2 mA, typically the dominant term). The nanoESP32-C6 has no jumper to isolate the module current, so the bare-MCU sleep current is not measured; when the thesis cites it, it shall come from the Espressif datasheet and be labelled as such. Confirm that the firmware leaves the RGB LED off.
 ---
 
 ## Design Decisions

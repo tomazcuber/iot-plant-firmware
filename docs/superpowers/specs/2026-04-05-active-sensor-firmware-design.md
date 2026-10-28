@@ -3,7 +3,9 @@
 **Project:** IoT Plant Monitoring — Bachelor's Thesis  
 **Firmware:** `apps/active-sensor`  
 **Date:** 2026-04-05  
-**Status:** Approved
+**Status:** Superseded (2026-10-15), not implemented
+
+> **Superseded.** With the INA219 bench, I_sensor and t_sensor are obtained from the current trace of the `main` firmware, using the phase markers described in the main firmware PRD. The sensor phase (about 120–180 ms, dominated by the BH1750FVI high-resolution measurement) is long enough to be resolved in the trace, and measuring it inside `main` captures the real sequence after waking from deep sleep. This PRD is kept to document the design decision; the requirements below are no longer in force.
 
 ---
 
@@ -12,7 +14,7 @@
 The active sensor firmware continuously powers the I2C bus, reads all four sensors in sequence, powers the bus down, and immediately repeats. Its sole purpose is to provide a stable, measurable baseline sensor-phase current (I_sensor) using a multimeter. This value feeds directly into the thesis energy model:
 
 ```
-E_cycle = (I_sleep × t_sleep + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V
+E_cycle = (I_sleep × t_sleep + I_boot × t_boot + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V
 ```
 
 This firmware contains no WiFi, no BLE, and no sleep logic.

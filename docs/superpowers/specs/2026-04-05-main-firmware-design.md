@@ -3,7 +3,7 @@
 **Project:** IoT Plant Monitoring — Bachelor's Thesis  
 **Firmware:** `apps/main`  
 **Date:** 2026-04-05  
-**Status:** Approved
+**Status:** Approved (energy model and measurement sections revised 2026-10-15)
 
 ---
 
@@ -12,10 +12,10 @@
 The main application firmware is the thesis deliverable. It implements a low-power IoT node that periodically reads environmental sensors, publishes data to an MQTT broker over WiFi, and optionally streams data to a nearby Android device over BLE. It alternates between deep sleep and active phases, with precise instrumentation of both durations to support the thesis energy model:
 
 ```
-E_cycle = (I_sleep × t_sleep + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V
+E_cycle = (I_sleep × t_sleep + I_boot × t_boot + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V
 ```
 
-Where I_sleep, I_wifi, and I_ble are measured externally using the `static-sleep`, `active-wifi`, and `active-ble` baseline firmwares respectively. The full hardware configuration (DevKitC-1 + all sensors physically connected) shall be used for all baseline measurements.
+Revised 2026-10-15: I_boot, I_sensor, I_wifi and I_ble, and the phase durations, are obtained from the INA219 current trace of this firmware (see Measurement Procedure). I_sleep is measured separately with the `static-sleep` firmware and a multimeter; `active-ble` provides a cross-check for I_ble. The full hardware configuration (nanoESP32-C6 + all sensors physically connected) shall be used for all measurements.
 
 ---
 
@@ -397,6 +397,34 @@ CONFIG_RETAINED_MEM=y
 CONFIG_RTC=y
 CONFIG_SNTP=y
 ```
+
+---
+
+## Measurement Procedure
+
+This procedure shall be documented in the thesis methodology chapter. Added 2026-10-15.
+
+### Bench
+
+- Board under test: MuseLab nanoESP32-C6, with the HDC1080, BMP280, BH1750FVI and the resistive soil moisture sensor (with its LM393 comparator module) connected and powered as in deployment.
+- Power: a second board connected to the computer by USB acts as the 5 V source. The board under test is powered only through its 5 V pin, via the measurement path. All grounds are common.
+- Neither USB-C port of the board under test may be connected during a measurement: a USB cable would power the board directly and bypass the measurement path. Connect USB only to flash, then disconnect it.
+- Power source voltage: V = 5 V.
+- Reader: the second board samples the INA219 as fast as the I2C link allows (target 1 kHz or more, single 12-bit conversions, no hardware averaging) and streams `t_us, current_mA, phase` lines to a CSV file on the computer.
+
+### Phase markers (proposed FR-MA-18, not yet implemented)
+
+Two free GPIOs of the board under test encode the current phase: `01` sensors, `10` Wi-Fi, `11` BLE, `00` otherwise. The firmware sets them at the same points where FR-MA-16 records its timestamps, and releases them before deep sleep. The pins shall avoid the strapping pins and the pins listed in Pin Assignment. The reader samples both pins with every current reading, with pull-downs so they read `00` during deep sleep.
+
+### Steps
+
+1. Provision `main` with the `read_interval_s` and `ble_window_s` of the condition under test, then disconnect USB.
+2. Insert the INA219 in series in the 5 V line and start logging.
+3. Log at least 10 complete wake cycles per run; repeat three runs per condition.
+4. For each cycle, compute I_sensor, I_wifi and I_ble as the mean current over the samples with that phase code, and t_sensor, t_wifi and t_ble as the duration of each code. The durations shall agree with the `status` payload values within one sampling period plus GPIO latency.
+5. Boot: the interval between the current rising out of sleep and the first `01` marker is **t_boot**, and its mean current is **I_boot**. `t_active_start` is taken at `main()` entry, so boot time appears in no published duration and is otherwise counted as sleep. Keep the term in E_cycle unless it proves negligible.
+6. Sleep: I_sleep from the `static-sleep` procedure; t_sleep from the `status` payload.
+7. Model validation: fit the currents with the runs at one `read_interval_s`, predict E_cycle at another, and compare with the energy measured directly from the trace at that interval.
 
 ---
 
