@@ -1,6 +1,6 @@
 # IoT Plant Monitor Firmware
 
-Firmware for a Bachelor's thesis on the energy profile of a low-power IoT plant-monitoring device. The repo ships one product firmware (`apps/main`) and four baseline-measurement firmwares (`apps/static-sleep`, `apps/active-sensor`, `apps/active-wifi`, `apps/active-ble`) that characterise individual terms of the thesis energy model.
+Firmware for a Bachelor's thesis on the energy profile of a low-power IoT plant-monitoring device. The repo ships one product firmware (`apps/main`), two `Baseline firmware`s (`apps/static-sleep`, `apps/active-ble`) that characterise individual terms of the thesis energy model, and one `Comparison baseline` (`apps/active-wifi`). `apps/active-sensor` is superseded and not built.
 
 ## Language
 
@@ -61,25 +61,29 @@ The device's persistent key-value store, accessed via Zephyr's Settings subsyste
 _Avoid_: config, configuration, preferences, NVS (the backing store), settings store, settings entry.
 
 **Sensor reading**:
-The per-`Cycle` composite captured during the `Active phase`, modelled in C++ as `struct SensorReading`. Holds all sensor values (HDC1080 temperature & humidity, BMP280 pressure & temperature, BH1750 lux, soil moisture % and raw ADC) plus per-cycle metadata (`wake_reason`, `timestamp_ms`). On publish it is projected onto two MQTT topics: the sensor values go to `plants/{device-name}/sensors/raw`, the metadata plus `Phase duration` measurements and `wifi_rssi_dbm` go to `plants/{device-name}/status`. The name follows the struct; despite "sensor", the value object is broader than just sensor data.
+The per-`Cycle` composite captured during the `Active phase`, modelled in C++ as `struct SensorReading`. Holds all sensor values (HDC1080 temperature & humidity, BMP280 pressure & temperature, BH1750 lux, soil moisture % and raw ADC), each either valid or failed (a failed value is published as `null`), plus per-cycle metadata (`wake_reason`, `timestamp_ms`). On publish it is projected onto two MQTT topics: the sensor values go to `plants/{device-name}/sensors/raw`, the metadata plus `Phase duration` measurements and `wifi_rssi_dbm` go to `plants/{device-name}/status`. The name follows the struct; despite "sensor", the value object is broader than just sensor data.
 _Avoid_: sample, observation, sensor data, raw payload, reading (unqualified).
 
 ### Energy model & measurement
 
 **Energy model**:
-The equation `E_cycle = (I_sleep × t_sleep + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V`. The thesis deliverable. Every measurement and instrumentation choice in the repo exists to populate one of its terms.
+The equation `E_cycle = (I_sleep × t_sleep + I_boot × t_boot + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V`. The thesis deliverable. Every measurement and instrumentation choice in the repo exists to populate one of its terms.
 _Avoid_: energy equation, power model (power is `I × V`, not the whole model).
 
 **Baseline firmware**:
-One of the four apps in `apps/{static-sleep, active-sensor, active-wifi, active-ble}`. Each strips the device down to a single steady-state behaviour so that one `Current draw` term of the `Energy model` can be measured externally with a multimeter. Not tests. Not production code paths. Their sole output is a number measured *off-device*.
+An app that strips the device down to a single steady-state behaviour so that one `Current draw` term can be measured where the product firmware's current trace can't resolve it. Two exist: `apps/static-sleep` (`I_sleep`, the primary source) and `apps/active-ble` (cross-check for `I_ble`). Not tests, not production code paths; their sole output is a number measured *off-device*.
 _Avoid_: test firmware, measurement app, baseline app.
 
+**Comparison baseline**:
+An app that implements an alternative architecture from the literature so its energy can be compared against `apps/main`'s. It shares `apps/main`'s per-publish workload and stack, so the comparison isolates the architecture. One exists: comparison baseline A (`apps/active-wifi`), always connected and never sleeping. It populates no `Current draw` term.
+_Avoid_: baseline (unqualified — collides with `Baseline firmware`), reference firmware, naive firmware.
+
 **Current draw**:
-The `I_*` family of variables in the `Energy model` (`I_sleep`, `I_sensor`, `I_wifi`, `I_ble`). Measured *externally* with a multimeter on the corresponding `Baseline firmware`. Treated as a constant per device configuration; not instrumented on-device.
+The `I_*` family of variables in the `Energy model` (`I_sleep`, `I_boot`, `I_sensor`, `I_wifi`, `I_ble`). Measured *externally*: `I_boot`, `I_sensor`, `I_wifi` and `I_ble` from the current trace of `apps/main`, segmented by phase; `I_sleep` from `apps/static-sleep`. Treated as a constant per device configuration; not instrumented on-device.
 _Avoid_: current consumption (verbose), amperage, draw.
 
 **Phase duration**:
-The `t_*` family of variables in the `Energy model` (`t_sleep`, `t_sensor`, `t_wifi`, `t_ble`, `t_active`). Measured *on-device* per `Cycle` in the product firmware (`apps/main`) and published in the `status` MQTT payload. Varies cycle to cycle; the central output of `Operational mode`'s instrumentation.
+The `t_*` family of variables in the `Energy model` (`t_sleep`, `t_boot`, `t_sensor`, `t_wifi`, `t_ble`, `t_active`). All except `t_boot` are measured *on-device* per `Cycle` in `apps/main` and published in the `status` MQTT payload. `t_boot` precedes the first on-device timestamp and exists only in the external current trace. Varies cycle to cycle.
 _Avoid_: phase time, segment duration, t-value.
 
 ## Flagged ambiguities
@@ -101,9 +105,9 @@ The `Phase duration` terms `t_sensor`, `t_wifi`, `t_ble` do not currently sum to
 >
 > **Thesis lead:** Then it's WiFi association variance, not sensor or BLE. Check the `wifi_rssi_dbm` field in the `status` payload on the slow cycles — if they correlate with low RSSI, that's a variance-attribution data point for the thesis, not a bug. Keep them in the dataset.
 >
-> **Dev:** Got it. While we're here — the `I_wifi` figure I'm multiplying `t_wifi` by, is that from a recent `Baseline firmware` measurement?
+> **Dev:** Got it. While we're here — the `I_wifi` figure I'm multiplying `t_wifi` by, is that from a recent measurement?
 >
-> **Thesis lead:** It's from `apps/active-wifi` running on the same `Device` with the same `Settings` (same `mqtt/broker`, same `wifi/ssid`). If the deployment moved to a different AP, re-measure — `Current draw` during association can shift with link conditions, and the whole `Energy model` assumes those `I_*` constants are stable for the configuration.
+> **Thesis lead:** It's from the current trace of `apps/main` on the same `Device` with the same `Settings` (same `mqtt/broker`, same `wifi/ssid`), averaged over the Wi-Fi phase. If the deployment moved to a different AP, re-measure — `Current draw` during association can shift with link conditions, and the whole `Energy model` assumes those `I_*` constants are stable for the configuration.
 >
 > **Dev:** Last thing — I want to flush the `device/cycle_count` for a clean run. Just erase NVS?
 >
@@ -130,7 +134,8 @@ The thesis is written in Brazilian Portuguese. These are the canonical PT-BR ren
 | Wake reason | motivo de despertar | valores em prosa: "despertar por temporizador" / "despertar por alerta de umidade do solo"; strings de fio `"timer"` / `"soil_moisture_alert"` mantidas literais |
 | Settings | configurações persistentes (*Settings*) | — |
 | Sensor reading | leitura de sensores | — |
-| Energy model | modelo de energia | a equação `E_cycle = (I_sleep·t_sleep + I_sensor·t_sensor + I_wifi·t_wifi + I_ble·t_ble)·V` |
+| Energy model | modelo de energia | a equação `E_cycle = (I_sleep·t_sleep + I_boot·t_boot + I_sensor·t_sensor + I_wifi·t_wifi + I_ble·t_ble)·V` |
 | Baseline firmware | firmware de referência | título da seção 4.5: "Firmwares de referência" |
+| Comparison baseline | firmware de comparação | provisório — confirmar |
 | Current draw | corrente de consumo | família `I_*` |
 | Phase duration | duração de fase | família `t_*` |

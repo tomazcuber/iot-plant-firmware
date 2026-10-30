@@ -1,6 +1,8 @@
 ---
-status: accepted
+status: superseded
 ---
+
+> **Superseded (2026-10-15 / 2026-10-30).** `apps/active-sensor` was dropped by the INA219 revision of the measurement procedure. `I_sensor` and `t_sensor` now come from the current trace of `apps/main`, using the phase markers (see the main firmware PRD, Measurement Procedure). This ADR's "share the sensor-read routine" consequence carries over to the comparison baseline: `apps/main` and `apps/active-wifi` share `plant_sensors_read()` through the `plant_sensors` module ([ADR-0005](0005-shared-modules-zephyr-module-shield-snippet.md), [ADR-0006](0006-comparison-baseline-same-stack.md)).
 
 # `active-sensor` baseline holds the device in a tight read loop with radios off
 
