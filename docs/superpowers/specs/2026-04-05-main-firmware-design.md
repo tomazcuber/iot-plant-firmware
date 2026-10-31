@@ -3,7 +3,7 @@
 **Project:** IoT Plant Monitoring — Bachelor's Thesis  
 **Firmware:** `apps/main`  
 **Date:** 2026-04-05  
-**Status:** Approved (energy model and measurement sections revised 2026-10-15)
+**Status:** Approved (energy model and measurement sections revised 2026-10-15; sensors, data model and build integration revised 2026-10-30 for the [shared modules](2026-10-30-shared-modules-design.md))
 
 ---
 
@@ -25,8 +25,8 @@ Revised 2026-10-15: I_boot, I_sensor, I_wifi and I_ble, and the phase durations,
 |---|---|
 | MCU | ESP32-C6 |
 | Board | ESP32-C6-DevKitC-1 (`esp32c6_devkitc`) |
-| RTOS | Zephyr RTOS v4.0 LTS |
-| Language | C++ (data modeling, application logic); C (Zephyr drivers) |
+| RTOS | Zephyr RTOS v4.3.1 |
+| Language | C++ (application logic); C (shared modules under `lib/`, phase markers) |
 | Power Source (primary) | USB 5V — bench measurement |
 | Power Source (nice-to-have) | Li-Po 3.7V nominal — simulated deployment |
 
@@ -37,11 +37,11 @@ Revised 2026-10-15: I_boot, I_sensor, I_wifi and I_ble, and the phase durations,
 | Sensor | Measurement | Protocol | Zephyr Driver |
 |---|---|---|---|
 | HDC1080 | Temperature (primary), Humidity | I2C | `ti,hdc` (upstream) |
-| BMP280 | Pressure, Temperature (secondary) | I2C | `bosch,bmp280` (upstream) |
+| BMP280 | Pressure, Temperature (secondary) | I2C | `bosch,bme280` (upstream; detects the BMP280 by chip ID; forced mode) |
 | BH1750FVI | Lux / Luminosity | I2C | `rohm,bh1750` (upstream) |
-| Resistive Soil Moisture | Soil moisture % | ADC | Direct ADC read (`<zephyr/drivers/adc.h>`) |
+| Resistive Soil Moisture | Soil moisture % | ADC | Soil helper in the `plant_sensors` module (direct ADC read, `<zephyr/drivers/adc.h>`) |
 
-All I2C sensors share a single I2C bus. The soil moisture sensor outputs an analog voltage read via the ESP32-C6 ADC peripheral and converted to a percentage via a calibration curve.
+All I2C sensors share a single I2C bus. The soil moisture sensor outputs an analog voltage read via the ESP32-C6 ADC peripheral and converted to a percentage via a calibration curve. Zephyr v4.3.1 has no `bosch,bmp280` binding; the BME280 driver covers the BMP280.
 
 Hardware is assembled on a protoboard. No custom PCB.
 
@@ -56,7 +56,7 @@ Hardware is assembled on a protoboard. No custom PCB.
 
 All four signals are on LP-domain GPIOs (GPIO0–GPIO7), which is required for GPIO6 to function as a deep sleep wake source. GPIO4 and GPIO5 are also LP-domain capable but are used here as standard I2C pins via the GPIO matrix. GPIO2 is ADC1\_CH2 and free of I2C and wake assignments.
 
-These assignments shall be defined in `apps/main/app.overlay` and `apps/active-sensor/app.overlay`.
+The I2C and ADC assignments are defined once in the `plant_sensors` shield, shared with comparison baseline A (see the [shared-modules spec](2026-10-30-shared-modules-design.md), SM-08 to SM-10). The upstream `esp32c6_devkitc` board routes I2C0 to GPIO6/GPIO7 by default; the shield moves it to GPIO4/GPIO5, which frees GPIO6. The GPIO6 wake source is defined only in `apps/main/app.overlay`.
 
 ---
 
@@ -181,8 +181,8 @@ On each wake, the firmware shall execute the following sequence in order:
 1. Record `t_active_start` timestamp (Zephyr `k_uptime_get()`)
 2. Record wake reason (timer or GPIO interrupt)
 2a. Check retained RAM `magic`; compute `t_sleep_ms` if valid, otherwise set `t_sleep_ms = null`
-3. Power on I2C bus; read all sensors sequentially (BMP280 → BH1750FVI → HDC1080 → soil moisture ADC)
-4. Power down I2C bus and ADC
+3. Read all sensors sequentially with `plant_sensors_read()` (BMP280 → BH1750FVI → HDC1080 → soil moisture ADC)
+4. *(Revised 2026-10-30: no explicit power-down.)* Each sensor returns to its own low-power state after its measurement, and the I2C and ADC peripherals turn off with the high-performance domain in deep sleep. The ESP32 I2C and ADC drivers have no device power-management support. See shared-modules spec SM-11.
 4a. Record `t_wifi_start` timestamp (Zephyr `k_uptime_get()`)
 5. Connect to WiFi (10-second timeout — see DD-MA-03)
 6. Synchronise wall-clock time via SNTP (3-second timeout — see DD-MA-11). On failure, set `timestamp_ms = null` and continue the cycle normally.
@@ -203,7 +203,11 @@ On each wake, the firmware shall execute the following sequence in order:
 
 #### FR-MA-08: Sensor Data Model
 
+Revised 2026-10-30. The sensor values are the shared C struct `plant_sensor_values` (`include/plant/types.h`, shared-modules spec SM-20). `main` embeds it as is rather than mirroring it in C++:
+
 ```cpp
+#include <plant/types.h>   // struct plant_sensor_values, PLANT_VALID_* bits
+
 namespace plant {
 
 enum class WakeReason {
@@ -212,26 +216,22 @@ enum class WakeReason {
 };
 
 struct SensorReading {
-    float temperature_c;                        // HDC1080 (primary)
-    float bmp280_temperature_c;                 // BMP280 (secondary, redundant)
-    float humidity_pct;                         // HDC1080
-    float pressure_hpa;                         // BMP280
-    float lux;                                  // BH1750FVI
-    float soil_moisture_pct;                    // Resistive ADC sensor, calibrated
-    uint16_t soil_moisture_raw_adc;             // Raw ADC value, pre-calibration
-    std::optional<int64_t> timestamp_ms;        // Wall-clock time (SNTP-synced); nullopt on SNTP failure
+    plant_sensor_values values;                 // sensor fields + `valid` bitmask (one bit per field)
     WakeReason wake_reason;
+    std::optional<int64_t> timestamp_ms;        // Wall-clock time (SNTP-synced); nullopt on SNTP failure
 };
 
 } // namespace plant
 ```
+
+`plant_sensor_values` holds `temperature_c` and `humidity_pct` (HDC1080), `bmp280_temperature_c` and `pressure_hpa` (BMP280), `lux` (BH1750FVI), `soil_moisture_pct` (calibrated) and `soil_moisture_raw_adc` (pre-calibration), plus a `valid` bitmask. A field is meaningful only when its bit is set.
 
 HDC1080 is the primary temperature source due to its higher precision. BMP280 temperature is published as a secondary reading for redundancy.
 
 > **Implementation note:** The HDC1080 requires a settling time (~6.5 ms in default 14-bit mode) between temperature and humidity reads. This is a driver-level concern handled by the upstream `ti,hdc` Zephyr driver and does not affect the wake cycle sequence at the spec level.
 
 #### FR-MA-08a: Sensor Failure Handling
-Each sensor read shall be attempted exactly once per cycle. No retries. On I2C bus failure, sensor NACK, timeout, or any driver-level read error, the corresponding field in the `sensors/raw` payload shall be published as JSON `null`. The cycle shall continue normally — `status` is published, `wifi_rssi_dbm` and timing data are captured, BLE advertising proceeds.
+Each sensor read shall be attempted exactly once per cycle. No retries. On I2C bus failure, sensor NACK, timeout, or any driver-level read error, the corresponding field in the `sensors/raw` payload shall be published as JSON `null`. The failure is carried by the cleared `valid` bit(s) of `plant_sensor_values`, and `plant_json` encodes every cleared field as `null`. The cycle shall continue normally — `status` is published, `wifi_rssi_dbm` and timing data are captured, BLE advertising proceeds.
 
 **Rationale:** A failed sensor read is itself informative data — it indicates a hardware issue (loose wire, dead sensor) that the operator needs to see in the dataset. Retries inflate `t_wifi_ms` ambiguously, hide hardware problems, and do not improve data quality on persistent faults. Aborting the entire cycle would also discard the still-valid timing, RSSI, and other-sensor data. Publishing `null` for failed sensors and continuing preserves maximum information per cycle and makes failures visible during post-processing.
 
@@ -248,6 +248,8 @@ Each sensor read shall be attempted exactly once per cycle. No retries. On I2C b
 
 #### FR-MA-10: Payload Schemas
 
+Both payloads are produced by the shared `plant_json` encoder (shared-modules spec SM-30, SM-31). The output is compact (no whitespace), keeps the field order shown below, and formats floats with one decimal place. The examples below are pretty-printed for readability.
+
 `plants/{device-name}/sensors/raw`:
 ```json
 {
@@ -262,7 +264,7 @@ Each sensor read shall be attempted exactly once per cycle. No retries. On I2C b
 }
 ```
 
-`timestamp_ms` shall be JSON `null` if SNTP synchronisation failed for this cycle. All other fields are unaffected.
+`timestamp_ms` shall be JSON `null` if SNTP synchronisation failed for this cycle. A sensor field shall be JSON `null` if that sensor's read failed (FR-MA-08a). Otherwise fields are unaffected.
 
 `plants/{device-name}/status`:
 ```json
@@ -298,7 +300,7 @@ A hardcoded default broker address shall be compiled into the firmware. If a non
 ### BLE Streaming
 
 #### FR-MA-13: Opportunistic BLE Streaming
-After WiFi teardown, the device shall advertise a GATT streaming service for a window of `ble_window_s` seconds (provisioned via BLE, stored in NVS). If `ble_window_s` is 0, BLE advertising shall be skipped entirely and the device shall proceed directly to deep sleep. If a client connects and subscribes to the `sensor_data` characteristic, the firmware shall send a single notification containing the latest `SensorReading` as JSON, then disconnect. If no client connects within the window, advertising stops immediately.
+After WiFi teardown, the device shall advertise a GATT streaming service for a window of `ble_window_s` seconds (provisioned via BLE, stored in NVS). If `ble_window_s` is 0, BLE advertising shall be skipped entirely and the device shall proceed directly to deep sleep. If a client connects and subscribes to the `sensor_data` characteristic, the firmware shall send a single notification containing the latest `SensorReading` as JSON, encoded by the same `plant_json_encode_raw()` as the `sensors/raw` payload, then disconnect. If no client connects within the window, advertising stops immediately.
 
 #### FR-MA-14: BLE Streaming Service
 
@@ -345,7 +347,7 @@ These UUIDs are the shared contract between the firmware and the Android app. Ne
 The firmware shall capture four timestamps using Zephyr's `k_uptime_get()`:
 
 - `t_active_start` — at wake entry (step 1 of the wake cycle)
-- `t_wifi_start` — after all sensors are read and peripherals are powered down, immediately before WiFi initialisation (step 4a)
+- `t_wifi_start` — after all sensors are read, immediately before WiFi initialisation (step 4a)
 - `t_ble_start` — immediately after WiFi and MQTT teardown, before BLE advertising begins (step 12, after step 11)
 - `t_active_end` — after BLE advertising stops, before deep sleep entry (step 16)
 
@@ -364,23 +366,29 @@ A `device/cycle_count` persisted in Settings shall increment on every wake and b
 ## Non-Functional Requirements
 
 ### NFR-MA-01: Deep Sleep Between Cycles
-The device shall enter Zephyr-managed deep sleep between cycles. All peripherals, WiFi stack, and BLE stack shall be fully powered down before sleep entry.
+The device shall enter Zephyr-managed deep sleep between cycles. The WiFi and BLE stacks shall be shut down before sleep entry. The on-chip peripherals turn off with the high-performance domain. The external sensors stay powered from the 3V3 rail and shall be in their own low-power states (shared-modules spec SM-11).
 
 ### NFR-MA-02: Minimise t_active
-The wake cycle sequence shall be optimised to minimise `t_active`. Specifically: peripherals shall be powered down before WiFi initialisation (reducing simultaneous current draw), and the BLE advertising window shall be bounded (5 seconds maximum) regardless of client activity.
+The wake cycle sequence shall be optimised to minimise `t_active`. Specifically: the sensor phase shall complete, with every sensor back in its low-power state, before WiFi initialisation (no simultaneous sensor and radio activity), and the BLE advertising window shall be bounded (5 seconds maximum) regardless of client activity.
 
 ### NFR-MA-03: Reproducible Measurements
 The firmware shall produce consistent, reproducible `t_active_ms` values across cycles under identical network conditions, enabling statistical analysis in the thesis.
 
 ### NFR-MA-04: Build System Integration
-The firmware shall build within the shared west workspace at the repository root, targeting the upstream `esp32c6_devkitc` board. Hardware-specific devicetree configuration (I2C sensor nodes, ADC channel for soil moisture, LP GPIO for deep sleep wake) shall be provided via `apps/main/app.overlay`.
+The firmware shall build within the shared west workspace at the repository root, targeting the upstream `esp32c6_devkitc` board. Revised 2026-10-30: `apps/main/CMakeLists.txt` sets `SHIELD plant_sensors` and `SNIPPET plant-net` before `find_package(Zephyr)`.
+- The shield provides the I2C sensor nodes, the soil moisture ADC channel, the sensor Kconfig and the soil calibration.
+- The snippet provides the network Kconfig.
+- `apps/main/app.overlay` contains only what `main` alone needs: the LP GPIO6 deep-sleep wake source and the phase-marker GPIOs.
+
+See the [shared-modules spec](2026-10-30-shared-modules-design.md) and [ADR-0005](../../adr/0005-shared-modules-zephyr-module-shield-snippet.md).
 
 ---
 
 ## Kconfig
 
+App-specific symbols only (`apps/main/prj.conf`). Sensor, network, WiFi, MQTT and SNTP symbols come from the `plant_sensors` shield and the `plant-net` snippet, and shall not be set here (shared-modules spec SM-05).
+
 ```
-CONFIG_WIFI=y
 CONFIG_BT=y
 CONFIG_BT_PERIPHERAL=y
 CONFIG_BT_GATT=y
@@ -388,14 +396,12 @@ CONFIG_BT_DEVICE_NAME_DYNAMIC=y
 CONFIG_BT_DEVICE_NAME_MAX=20
 CONFIG_PM=y
 CONFIG_PM_DEVICE=y
-CONFIG_MQTT_LIB=y
 CONFIG_CPP=y
 CONFIG_STD_CPP17=y
 CONFIG_SETTINGS=y
 CONFIG_SETTINGS_NVS=y
 CONFIG_RETAINED_MEM=y
 CONFIG_RTC=y
-CONFIG_SNTP=y
 ```
 
 ---
@@ -415,6 +421,8 @@ This procedure shall be documented in the thesis methodology chapter. Added 2026
 ### Phase markers (proposed FR-MA-18, not yet implemented)
 
 Two free GPIOs of the board under test encode the current phase: `01` sensors, `10` Wi-Fi, `11` BLE, `00` otherwise. The firmware sets them at the same points where FR-MA-16 records its timestamps, and releases them before deep sleep. The pins shall avoid the strapping pins and the pins listed in Pin Assignment. The reader samples both pins with every current reading, with pull-downs so they read `00` during deep sleep.
+
+The phase-marker code shall be a C unit with a C header inside `apps/main/src/` (`phase_markers.{h,c}`), called from `main`'s C++. It has one user today; keeping it C-compatible means moving it into a shared module later is a file move, not a rewrite (shared-modules spec, Consumers).
 
 ### Steps
 
@@ -488,11 +496,13 @@ On SNTP failure, aborting the cycle would discard valid sensor readings, timing 
 **Thesis implication:** The methodology chapter should note that SNTP latency is included in `t_wifi_ms` and is a small but real component of the measured WiFi-phase duration. Records with `null` timestamp are identifiable in the dataset and can be reconstructed or excluded as appropriate for the analysis.
 
 ### DD-MA-12: Soil Moisture Calibration via Kconfig, Raw ADC Always Published
-The soil moisture percentage is computed from the raw ADC value using a two-point linear calibration: `soil_moisture_pct = 100 × (CONFIG_SOIL_DRY_ADC - raw_adc) / (CONFIG_SOIL_DRY_ADC - CONFIG_SOIL_WET_ADC)`. The two reference points are exposed as Kconfig values (`CONFIG_SOIL_DRY_ADC`, `CONFIG_SOIL_WET_ADC`) defined in `apps/main/Kconfig` with defaults set in `apps/main/prj.conf`. They are characterised once per probe by measuring the ADC value with the probe in dry air and submerged in water, then updating `prj.conf` (or overriding via `west build -t menuconfig`) and rebuilding. The raw ADC value is always published in `sensors/raw` alongside the calibrated percentage.
+The soil moisture percentage is computed from the raw ADC value using a two-point linear calibration: `soil_moisture_pct = 100 × (CONFIG_PLANT_SOIL_DRY_ADC - raw_adc) / (CONFIG_PLANT_SOIL_DRY_ADC - CONFIG_PLANT_SOIL_WET_ADC)`, clamped to [0, 100]. The two reference points are Kconfig values (`CONFIG_PLANT_SOIL_DRY_ADC`, `CONFIG_PLANT_SOIL_WET_ADC`). They are defined in `lib/plant_sensors/Kconfig` with placeholder defaults, and set to the characterised values in the `plant_sensors` shield's `plant_sensors.conf`, the single place shared by every app that reads the probe. They are characterised once per probe by measuring the ADC value with the probe in dry air and submerged in water, then updating `plant_sensors.conf` and rebuilding. The raw ADC value is always published in `sensors/raw` alongside the calibrated percentage, unclamped.
+
+*Revised 2026-10-30:* the symbols were renamed from `CONFIG_SOIL_*` and moved out of `apps/main/Kconfig` when the soil read became shared with comparison baseline A (shared-modules spec SM-12, SM-23, SM-24).
 
 **Rationale:** Storing calibration in Settings would require an additional provisioning flow (sensor characterisation via Android app) which is out of scope for the thesis. Kconfig values are simple, version-controlled, inspectable via `menuconfig`, and adequate for a single-sensor thesis demo. Publishing the raw ADC value makes the dataset re-calibratable in post-processing — if the calibration constants are later found to be wrong (e.g., dry-baseline measured with a damp probe, probe replacement after corrosion), the percentage can be recomputed without re-collecting data. This is a one-line cost in payload size (~5 bytes) for permanent dataset insurance.
 
-**Thesis implication:** The methodology chapter should record the `CONFIG_SOIL_DRY_ADC` and `CONFIG_SOIL_WET_ADC` values used during the experiment, alongside the probe model and VCC voltage at characterisation time. Any post-hoc recalibration should be presented alongside the original calibration, with both percentages derivable from the published raw ADC.
+**Thesis implication:** The methodology chapter should record the `CONFIG_PLANT_SOIL_DRY_ADC` and `CONFIG_PLANT_SOIL_WET_ADC` values used during the experiment, alongside the probe model and VCC voltage at characterisation time. Any post-hoc recalibration should be presented alongside the original calibration, with both percentages derivable from the published raw ADC.
 
 ### DD-MA-13: WiFi RSSI Capture as Variance Attribution Variable
 The firmware shall capture `wifi_rssi_dbm` once per cycle, immediately after MQTT publish completes and before WiFi teardown. Single sample, no averaging. The value is published in the `status` topic.
@@ -514,3 +524,10 @@ Primary measurement platform: USB 5V (bench measurement). The onboard LDO regula
 **Nice-to-have:** Li-Po 3.7V nominal, powering the board directly or via a small LDO, for simulated deployment energy measurements. This would require a separate measurement run with `V = 3.7V` in the energy formula.
 
 **Thesis implication:** The primary thesis results use V = 5V (USB bench measurement). If Li-Po measurements are included, they should be presented as a separate scenario with V = 3.7V.
+
+### DD-MA-15: WiFi Power Save `MIN_MODEM`, Shared with Comparison Baseline A
+The WiFi station power-save mode is set explicitly to `MIN_MODEM` with `esp_wifi_set_ps()` after association, because the Zephyr ESP32 WiFi driver doesn't implement Zephyr's power-save call. The mode comes from the `plant-net` snippet shared with comparison baseline A, as do DHCP addressing, MQTT keepalive (60 s) and the MQTT client ID (= `device_name`).
+
+**Rationale:** See [ADR-0006](../../adr/0006-comparison-baseline-same-stack.md). In `main` the mode only affects the short idle gaps within a cycle's connection (DHCP, MQTT CONNECT/CONNACK), so its effect on `t_wifi` is second-order. Pinning it removes a silent library default from the measured configuration.
+
+**Thesis implication:** Record the power-save mode and the access point's DTIM period with the bench setup.
