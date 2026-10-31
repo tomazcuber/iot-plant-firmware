@@ -1,0 +1,2 @@
+zephyr_include_directories(include)
+add_subdirectory_ifdef(CONFIG_PLANT_JSON lib/plant_json)
