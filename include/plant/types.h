@@ -1,7 +1,6 @@
 #ifndef PLANT_TYPES_H
 #define PLANT_TYPES_H
 
-#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus

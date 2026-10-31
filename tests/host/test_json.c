@@ -25,7 +25,18 @@ static int failures;
 		}                                                            \
 	} while (0)
 
-#define ALL_VALID 0x7Fu
+#define ALL_VALID                                                            \
+	(PLANT_VALID_TEMPERATURE_C | PLANT_VALID_HUMIDITY_PCT |              \
+	 PLANT_VALID_BMP280_TEMPERATURE_C | PLANT_VALID_PRESSURE_HPA |       \
+	 PLANT_VALID_LUX | PLANT_VALID_SOIL_MOISTURE_PCT |                   \
+	 PLANT_VALID_SOIL_MOISTURE_RAW_ADC)
+
+#define ALL_PRESENT                                                          \
+	(PLANT_STATUS_WAKE_REASON | PLANT_STATUS_T_ACTIVE_MS |               \
+	 PLANT_STATUS_T_SENSOR_MS | PLANT_STATUS_T_WIFI_MS |                 \
+	 PLANT_STATUS_T_BLE_MS | PLANT_STATUS_T_SLEEP_MS |                   \
+	 PLANT_STATUS_WIFI_RSSI_DBM | PLANT_STATUS_CYCLE_COUNT |             \
+	 PLANT_STATUS_TIMESTAMP_MS)
 
 static struct plant_sensor_values sample_values(void)
 {
@@ -54,7 +65,7 @@ static struct plant_status sample_status(void)
 		.wifi_rssi_dbm = -62,
 		.cycle_count = 42,
 		.timestamp_ms = 1712000000000LL,
-		.present = 0x1FF,
+		.present = ALL_PRESENT,
 	};
 	return s;
 }
@@ -159,7 +170,7 @@ static void test_each_status_bit_cleared(void)
 		struct plant_status s = sample_status();
 		char buf[PLANT_JSON_STATUS_MAX], want[PLANT_JSON_STATUS_MAX];
 
-		s.present = (uint16_t)(0x1FFu & ~cases[i].bit);
+		s.present = (uint16_t)(ALL_PRESENT & ~cases[i].bit);
 		CHECK(plant_json_encode_status(&s, buf, sizeof(buf)) > 0);
 		CHECK(substitute(want, sizeof(want), STATUS_EXAMPLE, cases[i].from, cases[i].to) == 0);
 		CHECK_STR(buf, want);
@@ -211,6 +222,11 @@ static void test_wake_reasons(void)
 	s.wake_reason = PLANT_WAKE_TIMER;
 	CHECK(plant_json_encode_status(&s, buf, sizeof(buf)) > 0);
 	CHECK(strstr(buf, "\"wake_reason\":\"timer\",\"t_active_ms\"") != NULL);
+
+	/* an out-of-range value is never reported as a real cause */
+	s.wake_reason = (enum plant_wake_reason)99;
+	CHECK(plant_json_encode_status(&s, buf, sizeof(buf)) > 0);
+	CHECK(strstr(buf, "\"wake_reason\":null,\"t_active_ms\"") != NULL);
 }
 
 static void test_enomem_one_byte_short(void)
@@ -274,6 +290,13 @@ static void test_raw_max_fits(void)
 	v.pressure_hpa = v.lux = v.soil_moisture_pct = 99999.9f;
 	v.soil_moisture_raw_adc = UINT16_MAX;
 	CHECK(plant_json_encode_raw(&v, &ts, buf, sizeof(buf)) > 0);
+	CHECK_STR(buf,
+		  "{\"temperature_c\":-99999.9,\"bmp280_temperature_c\":-99999.9,"
+		  "\"humidity_pct\":-99999.9,\"pressure_hpa\":99999.9,\"lux\":99999.9,"
+		  "\"soil_moisture_pct\":99999.9,\"soil_moisture_raw_adc\":65535,"
+		  "\"timestamp_ms\":9223372036854775807}");
+	/* the worst case must fit the advertised maximum */
+	CHECK(strlen(buf) < PLANT_JSON_RAW_MAX);
 }
 
 static void test_never_nan_or_inf(void)
