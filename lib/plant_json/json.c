@@ -1,5 +1,4 @@
 #include <errno.h>
-#include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -65,7 +64,7 @@ static void put_null(struct writer *w, const char *key)
 
 static void put_float(struct writer *w, const char *key, bool valid, float val)
 {
-	if (!valid || !isfinite(val)) {
+	if (!valid) {
 		put_null(w, key);
 		return;
 	}

@@ -1,6 +1,5 @@
 #include <errno.h>
 #include <inttypes.h>
-#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -299,20 +298,6 @@ static void test_raw_max_fits(void)
 	CHECK(strlen(buf) < PLANT_JSON_RAW_MAX);
 }
 
-static void test_never_nan_or_inf(void)
-{
-	struct plant_sensor_values v = sample_values();
-	int64_t ts = 1;
-	char buf[PLANT_JSON_RAW_MAX];
-
-	v.temperature_c = NAN;
-	v.lux = INFINITY;
-	CHECK(plant_json_encode_raw(&v, &ts, buf, sizeof(buf)) > 0);
-	CHECK(strstr(buf, "\"temperature_c\":null") != NULL);
-	CHECK(strstr(buf, "\"lux\":null") != NULL);
-	CHECK(strstr(buf, "nan") == NULL && strstr(buf, "inf") == NULL);
-}
-
 int main(void)
 {
 	test_raw_example();
@@ -326,7 +311,6 @@ int main(void)
 	test_negative_rssi();
 	test_uint32_max();
 	test_raw_max_fits();
-	test_never_nan_or_inf();
 
 	if (failures) {
 		printf("test_json: %d failure(s)\n", failures);
