@@ -5,6 +5,8 @@
             "compileCommands": "C:/zw/build/compile_commands.json",
             "includePath": [
                 "${workspaceFolder}/apps/**",
+                "${workspaceFolder}/lib/**",
+                "${workspaceFolder}/include/**",
                 "C:/zw/zephyr/include",
                 "C:/zw/build/zephyr/include/generated"
             ],
