@@ -1,0 +1,20 @@
+config PLANT_SENSORS
+	bool "Plant sensor-phase read"
+	depends on I2C && ADC && SENSOR
+	help
+	  Run one sensor phase: BMP280, BH1750FVI, HDC1080, soil moisture ADC.
+	  Enabled by the plant_sensors shield, not by an app.
+
+if PLANT_SENSORS
+
+config PLANT_SOIL_DRY_ADC
+	int "Raw ADC value, probe in dry air"
+	range 0 4095
+	default 3000
+
+config PLANT_SOIL_WET_ADC
+	int "Raw ADC value, probe submerged"
+	range 0 4095
+	default 1500
+
+endif # PLANT_SENSORS

@@ -1,0 +1,2 @@
+config SHIELD_PLANT_SENSORS
+	def_bool $(shields_list_contains,plant_sensors)
