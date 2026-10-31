@@ -1,0 +1,77 @@
+/*
+ * Plant monitor sensor set (SM-07..SM-10).
+ *
+ * The shield holds the I2C0 pin move, the three I2C sensors and the soil
+ * moisture ADC channel. App-specific devicetree (the LM393 wake source on
+ * GPIO6) stays in apps/main/app.overlay (SM-06).
+ */
+
+#include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+&pinctrl {
+	/*
+	 * Move I2C0 to SDA = GPIO4, SCL = GPIO5. The upstream board default is
+	 * SDA = GPIO6, SCL = GPIO7. This move frees GPIO6, which
+	 * apps/main/app.overlay configures as the LM393 deep-sleep wake source.
+	 */
+	plant_i2c0_default: plant_i2c0_default {
+		group1 {
+			pinmux = <I2C0_SDA_GPIO4>,
+				 <I2C0_SCL_GPIO5>;
+			bias-pull-up;
+			drive-open-drain;
+			output-high;
+		};
+	};
+};
+
+&i2c0 {
+	status = "okay";
+	/* Own pinctrl state, so the board default (GPIO6/7) is never applied.
+	 * The bus clock stays at the board default. */
+	pinctrl-0 = <&plant_i2c0_default>;
+	pinctrl-names = "default";
+
+	/* BMP280. There is no bosch,bmp280 binding; the BME280 driver detects
+	 * the BMP280 by chip ID. The address is 0x76 (SDO low) or 0x77 (SDO
+	 * high): confirm it against the module's SDO strap. */
+	bmp280: bmp280@76 {
+		compatible = "bosch,bme280";
+		reg = <0x76>;
+	};
+
+	/* BH1750FVI, ADDR pin low. */
+	bh1750: bh1750@23 {
+		compatible = "rohm,bh1750";
+		reg = <0x23>;
+	};
+
+	/* HDC1080, fixed address. No drdy-gpios: the chip has no DRDY pin and
+	 * the driver falls back to a fixed conversion delay. */
+	hdc1080: hdc1080@40 {
+		compatible = "ti,hdc";
+		reg = <0x40>;
+	};
+};
+
+&adc0 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	/* Soil moisture probe on GPIO2 = ADC1_CH2. */
+	channel@2 {
+		reg = <2>;
+		zephyr,gain = "ADC_GAIN_1_4";
+		zephyr,reference = "ADC_REF_INTERNAL";
+		zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+		zephyr,resolution = <12>;
+	};
+};
+
+/ {
+	zephyr,user {
+		io-channels = <&adc0 2>;
+	};
+};
