@@ -1,0 +1,9 @@
+# Built or run under WSL/Linux: CRLF breaks make recipes and shell scripts.
+Makefile text eol=lf
+*.sh text eol=lf
+*.c text eol=lf
+*.h text eol=lf
+*.yml text eol=lf
+*.conf text eol=lf
+CMakeLists.txt text eol=lf
+Kconfig text eol=lf

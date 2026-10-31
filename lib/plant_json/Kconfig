@@ -1,0 +1,5 @@
+config PLANT_JSON
+	bool "Plant JSON payload encoder"
+	help
+	  Encode the sensors/raw and status payloads (FR-MA-10). Pure C, no
+	  dependency on the other plant modules.

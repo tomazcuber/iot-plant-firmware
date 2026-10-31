@@ -285,7 +285,7 @@ Nullable fields:
 - `timestamp_ms` — JSON `null` if SNTP synchronisation failed this cycle
 - `t_sleep_ms` — JSON `null` if retained RAM was uninitialised on wake (first boot, reflash, or power loss during sleep). Occurs at most once per power cycle; all subsequent cycles will have a valid value.
 
-All other fields are always published.
+`main` publishes every other `status` field on every cycle. The encoder itself can emit any `status` field as `null` (shared-modules spec SM-31, SM-50), because comparison baseline A shares it and has no `wake_reason` or `t_*_ms` to report (ADR-0006).
 
 > **Invariant:** `t_active_ms == t_sensor_ms + t_wifi_ms + t_ble_ms`. A violation indicates a firmware instrumentation bug. When `ble_window_s` is 0, `t_ble_ms` shall be published as 0.
 
