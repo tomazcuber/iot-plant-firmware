@@ -69,7 +69,7 @@ int plant_wifi_connect(const char *ssid, const char *psk, int32_t timeout_ms)
 	if (!initialised) {
 		return -EINVAL;
 	}
-	ret = plant_wifi_args_check(ssid, psk);
+	ret = plant_wifi_credentials_valid(ssid, psk);
 	if (ret < 0) {
 		return ret;
 	}

@@ -22,14 +22,14 @@ int main(void)
 	CHECK(plant_sntp_epoch_ms(0, 0xFFFFFFFFu) == 999);
 	CHECK(plant_sntp_epoch_ms(1, 0x40000000u) == 1250);
 
-	/* Credential limits: SSID 1..32 bytes, WPA2 passphrase 8..63 (or 64 hex). */
-	CHECK(plant_wifi_args_check("net", "password") == 0);
-	CHECK(plant_wifi_args_check("", "password") == -EINVAL);
-	CHECK(plant_wifi_args_check("net", "short") == -EINVAL);
-	CHECK(plant_wifi_args_check(NULL, "password") == -EINVAL);
-	CHECK(plant_wifi_args_check("net", NULL) == -EINVAL);
-	CHECK(plant_wifi_args_check("012345678901234567890123456789012", "password") == -EINVAL);
-	CHECK(plant_wifi_args_check("012345678901234567890123456789ab", "password") == 0);
+	/* Credential limits: SSID 1..32 bytes, PSK 8..64 bytes (open networks are not supported). */
+	CHECK(plant_wifi_credentials_valid("net", "password") == 0);
+	CHECK(plant_wifi_credentials_valid("", "password") == -EINVAL);
+	CHECK(plant_wifi_credentials_valid("net", "short") == -EINVAL);
+	CHECK(plant_wifi_credentials_valid(NULL, "password") == -EINVAL);
+	CHECK(plant_wifi_credentials_valid("net", NULL) == -EINVAL);
+	CHECK(plant_wifi_credentials_valid("012345678901234567890123456789012", "password") == -EINVAL);
+	CHECK(plant_wifi_credentials_valid("012345678901234567890123456789ab", "password") == 0);
 
 	if (failures) {
 		printf("%d failure(s)\n", failures);

@@ -13,7 +13,7 @@ int64_t plant_sntp_epoch_ms(uint64_t seconds, uint32_t fraction);
 
 /* Validate WiFi credentials: SSID 1..32 bytes, PSK 8..64 bytes.
  * Returns 0 or -EINVAL. */
-int plant_wifi_args_check(const char *ssid, const char *psk);
+int plant_wifi_credentials_valid(const char *ssid, const char *psk);
 
 #ifdef __cplusplus
 }

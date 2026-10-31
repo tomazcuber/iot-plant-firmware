@@ -37,7 +37,7 @@ int plant_soil_read(uint16_t *raw, float *pct)
 	}
 
 	/* The raw value is reported unclamped; only the percentage is clamped. */
-	*raw = sample < 0 ? 0 : (uint16_t)sample;
+	*raw = sample < 0 ? 0 : (uint16_t)sample; /* uint16_t cannot hold a negative sample */
 	*pct = plant_soil_pct(*raw, CONFIG_PLANT_SOIL_DRY_ADC,
 			      CONFIG_PLANT_SOIL_WET_ADC);
 	return 0;

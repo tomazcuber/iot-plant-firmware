@@ -8,7 +8,7 @@ int64_t plant_sntp_epoch_ms(uint64_t seconds, uint32_t fraction)
 	return (int64_t)(seconds * 1000u) + (int64_t)(((uint64_t)fraction * 1000u) >> 32);
 }
 
-int plant_wifi_args_check(const char *ssid, const char *psk)
+int plant_wifi_credentials_valid(const char *ssid, const char *psk)
 {
 	if (ssid == NULL || psk == NULL) {
 		return -EINVAL;
