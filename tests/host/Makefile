@@ -8,7 +8,8 @@ TESTS := test_json
 all: $(TESTS)
 
 test_json: test_json.c ../../lib/plant_json/json.c
-	$(CC) $(CFLAGS) -o $@ $^	./$@
+	$(CC) $(CFLAGS) -o $@ $^
+	./$@
 
 clean:
 	rm -f $(TESTS)
