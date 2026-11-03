@@ -3,9 +3,12 @@
 
 # west build output
 build/
+build-*/
 
 # credentials — never commit
 apps/active-wifi/credentials.conf
 
 # local issue tracker
 .scratch/
+# net-smoke WiFi credentials — never commit
+tests/bench/net-smoke/credentials.conf

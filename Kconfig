@@ -1,1 +1,3 @@
+rsource "lib/plant_sensors/Kconfig"
 rsource "lib/plant_json/Kconfig"
+rsource "lib/plant_net/Kconfig"

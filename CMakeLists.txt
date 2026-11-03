@@ -1,2 +1,4 @@
 zephyr_include_directories(include)
+add_subdirectory_ifdef(CONFIG_PLANT_SENSORS lib/plant_sensors)
 add_subdirectory_ifdef(CONFIG_PLANT_JSON lib/plant_json)
+add_subdirectory_ifdef(CONFIG_PLANT_NET lib/plant_net)

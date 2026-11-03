@@ -1,0 +1,40 @@
+config PLANT_NET
+	bool "Plant network primitives (WiFi, MQTT, SNTP)"
+	depends on WIFI && MQTT_LIB && SNTP && NET_DHCPV4 && DNS_RESOLVER
+	help
+	  Blocking WiFi, SNTP and MQTT primitives shared by apps/main and
+	  apps/active-wifi (SM-40..SM-42). Enabled by the plant-net snippet.
+
+if PLANT_NET
+
+choice PLANT_NET_WIFI_PS
+	prompt "WiFi station power-save mode"
+	default PLANT_NET_WIFI_PS_MIN_MODEM
+	help
+	  Applied with esp_wifi_set_ps() after every association (SM-16,
+	  ADR-0006). The Zephyr ESP32 WiFi driver does not do this itself.
+
+config PLANT_NET_WIFI_PS_NONE
+	bool "None (receiver always on)"
+
+config PLANT_NET_WIFI_PS_MIN_MODEM
+	bool "Minimum modem sleep (wake every DTIM)"
+
+config PLANT_NET_WIFI_PS_MAX_MODEM
+	bool "Maximum modem sleep (wake every listen interval)"
+
+endchoice
+
+config PLANT_NET_MQTT_PORT
+	int "MQTT broker TCP port"
+	default 1883
+
+config PLANT_NET_MQTT_BUFFER_SIZE
+	int "MQTT client RX/TX buffer size (bytes, each)"
+	default 512
+
+config PLANT_NET_SNTP_SERVER
+	string "SNTP server"
+	default "pool.ntp.org"
+
+endif # PLANT_NET

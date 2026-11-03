@@ -1,0 +1,13 @@
+mainmenu "plant_net smoke test"
+
+config SMOKE_WIFI_SSID
+	string "WiFi SSID"
+
+config SMOKE_WIFI_PSK
+	string "WiFi PSK"
+
+config SMOKE_CONNECT_TIMEOUT_MS
+	int "plant_wifi_connect timeout (ms)"
+	default 30000
+
+source "Kconfig.zephyr"
