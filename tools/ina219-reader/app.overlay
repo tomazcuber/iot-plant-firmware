@@ -1,0 +1,43 @@
+/*
+ * INA219 reader wiring (spec Bench / Wiring).
+ *   GPIO4 = SDA, GPIO5 = SCL  (same pins as the plant_sensors shield, but
+ *                              declared here: the reader uses no shield)
+ *   GPIO6 = phase-marker bit 1 (MSB), GPIO7 = phase-marker bit 0 (LSB)
+ * If the board's silkscreen does not break out GPIO6/GPIO7, use GPIO2 (bit 1)
+ * and GPIO3 (bit 0) and change the two marker-gpios entries below.
+ */
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&pinctrl {
+	/* The upstream default is SDA = GPIO6, SCL = GPIO7, which would collide
+	 * with the marker inputs. */
+	reader_i2c0_default: reader_i2c0_default {
+		group1 {
+			pinmux = <I2C0_SDA_GPIO4>,
+				 <I2C0_SCL_GPIO5>;
+			bias-pull-up;
+			drive-open-drain;
+			output-high;
+		};
+	};
+};
+
+&i2c0 {
+	status = "okay";
+	pinctrl-0 = <&reader_i2c0_default>;
+	pinctrl-names = "default";
+};
+
+/* Data port (RD-02). The console stays on UART0. */
+&usb_serial {
+	status = "okay";
+};
+
+/ {
+	zephyr,user {
+		/* index 0 = bit 1 (MSB), index 1 = bit 0 (LSB); pull-down so an
+		 * unconnected DUT (or deep sleep) reads 00. */
+		marker-gpios = <&gpio0 6 GPIO_PULL_DOWN>,
+			       <&gpio0 7 GPIO_PULL_DOWN>;
+	};
+};
