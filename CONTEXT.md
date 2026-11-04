@@ -7,7 +7,7 @@ Firmware for a Bachelor's thesis on the energy profile of a low-power IoT plant-
 ### Product domain
 
 **Device**:
-A single ESP32-C6 board running one of the firmwares in `apps/`. The unit of deployment and the unit of energy measurement.
+A single ESP32-C6 board running one of the firmwares in `apps/`. The unit of deployment and the unit of energy measurement. The `Reader` is not a Device.
 _Avoid_: node, monitor, plant monitor (the BLE advertised name `PlantMonitor-XXXX` and the MQTT-facing `device_name` are external identifiers, not aliases for the term).
 
 **Cycle**:
@@ -86,6 +86,40 @@ _Avoid_: current consumption (verbose), amperage, draw.
 The `t_*` family of variables in the `Energy model` (`t_sleep`, `t_boot`, `t_sensor`, `t_wifi`, `t_ble`, `t_active`). All except `t_boot` are measured *on-device* per `Cycle` in `apps/main` and published in the `status` MQTT payload. `t_boot` precedes the first on-device timestamp and exists only in the external current trace. Varies cycle to cycle.
 _Avoid_: phase time, segment duration, t-value.
 
+### Measurement bench
+
+**Device under test (DUT)**:
+The `Device` being measured in a `Run`, powered only through the `Reader`'s shunt path. A role, not a different board: any firmware in `apps/` or `tests/bench/` can be the DUT.
+_Avoid_: board under test, target, measured board.
+
+**Reader**:
+The bench instrument that samples the INA219 and streams the `Current trace` to the PC: a second nanoESP32-C6 running `tools/ina219-reader`. Never a `Device`, and none of its settings enter the `Energy model`.
+_Avoid_: second board, logger, sampler, meter (reserved for the multimeter).
+
+**Reader configuration**:
+How the `Reader` samples during a `Run`. Two values: **Trace** (one 12-bit conversion per sample, no averaging, for phase-resolved traces) and **Averaged** (128-sample hardware averaging, for steady-state means such as `active-ble`).
+_Avoid_: mode (reserved for the `Device`'s `Mode`), profile.
+
+**Run**:
+One recording session of the `Reader`, from `start` to `stop`: one CSV `Current trace` plus its sidecar of metadata. The unit of repetition in every bench procedure ("three runs per condition").
+_Avoid_: capture, session, log, measurement (unqualified).
+
+**Current trace**:
+The time series of samples (`seq`, `t_us`, raw shunt value, `Phase marker` code) recorded in one `Run`. Holds raw values; current in mA exists only after conversion with `R_eff`.
+_Avoid_: waveform, capture, log.
+
+**Phase marker**:
+The two-bit code the DUT drives on two GPIOs to signal its current phase (`01` sensors, `10` Wi-Fi, `11` BLE, `00` otherwise), read by the `Reader` with every sample. Lets a `Current trace` be cut into the `Energy model`'s phases.
+_Avoid_: phase pin, phase flag, phase signal.
+
+**R_eff**:
+The calibrated effective resistance of the INA219 module's shunt, derived against the multimeter. The only constant used to convert raw shunt values to current. Replaces the nominal 0.1 Ω.
+_Avoid_: shunt value, calibration factor.
+
+**Reader acceptance**:
+The bench checks the `Reader` must pass before its data is used, at two levels. **Gate-ready** means good enough for relative comparisons such as the DTIM gate. **Measurement-ready** means calibrated, good enough for any `Current draw` value.
+_Avoid_: validation (unqualified), reader test.
+
 ## Flagged ambiguities
 
 **`Active phase` vs `Energy model` conservation.**
@@ -139,3 +173,11 @@ The thesis is written in Brazilian Portuguese. These are the canonical PT-BR ren
 | Comparison baseline | firmware de comparação | provisório — confirmar |
 | Current draw | corrente de consumo | família `I_*` |
 | Phase duration | duração de fase | família `t_*` |
+| Device under test (DUT) | dispositivo sob teste (DUT) | provisório — confirmar |
+| Reader | leitor de corrente | provisório — confirmar |
+| Reader configuration (Trace / Averaged) | configuração do leitor (*Trace* / *Averaged*) | provisório — confirmar |
+| Run | execução | provisório — confirmar |
+| Current trace | registro de corrente | provisório — confirmar |
+| Phase marker | marcador de fase | — |
+| R_eff | resistência efetiva do *shunt* (R_eff) | — |
+| Reader acceptance | aceitação do leitor | provisório — confirmar |
