@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> Amended by [ADR-0008](0008-offset-corrected-least-squares-calibration.md): the host conversion also subtracts a per-session zero offset, and R_eff is a least-squares fit over all calibration loads.
+
 # The current reader records raw, gap-free shunt samples and converts on the host
 
 Every `Current draw` term except `I_sleep` comes from the INA219 current trace, so how the reader samples determines how far every current figure in the thesis can be trusted. The INA219 runs in **continuous, shunt-only** mode: each 12-bit conversion integrates the shunt voltage over 532 µs, and conversions run back-to-back, so no interval of the trace goes unmeasured and the integral of current over time (the energy) has no holes. The reader reads the shunt register **faster than conversions complete** (every 500 µs). Every conversion is read at least once, and the few duplicates don't bias the means, because each conversion spans the same duration. The reader sends the **raw signed register value**, and the host converts it to mA with a calibrated shunt resistance `R_eff` kept in `tools/ina219-reader/calibration.json`. The chip's calibration and current registers are not used.
