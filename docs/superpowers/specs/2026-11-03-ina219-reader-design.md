@@ -180,7 +180,7 @@ The mA input is fused 500 mA/250 V, and its burden voltage is 200 mV at full sca
 
 | # | Check | Pass criterion |
 |---|---|---|
-| 1 | **Zero offset.** VIN− open (no load), Trace, 10 s (`record.py --zero`) | the offset is measured, recorded and stable across the session's zero runs. *Stability threshold: to be set by the user (observed spread: 0.13 LSB over two days)* |
+| 1 | **Zero offset.** VIN− open (no load), Trace, 10 s (`record.py --zero`) | the offset is measured, recorded and stable: the session's zero runs agree within **±0.5 LSB** (±0.05 mA) of each other (observed spread so far: 0.13 LSB over two days) |
 | 2 | **Calibration.** Each of the four loads (1 kΩ on 20m; 220 Ω, 100 Ω and 47 Ω on 200m), meter in series, Trace 30 s, with a zero run in the same session | R_eff = least squares through the origin over the four offset-corrected (V, I) points, written to `calibration.json` with its readings (RD-15) |
 | 3 | **Accuracy.** The same four runs, converted with R_eff and the session offset | each mean agrees with the meter **within the HM-1001's rated accuracy** for the range and reading (table above) |
 | 4 | **Timing and integrity.** 100 Ω load (or open), Trace 10 min | 0 `seq` gaps, 0 overflows, mean interval ≤ 500 µs, ≥ 99.9 % of intervals < 532 µs |
