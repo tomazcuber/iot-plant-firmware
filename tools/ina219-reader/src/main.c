@@ -18,6 +18,8 @@
 #include <zephyr/drivers/uart.h>
 #include <zephyr/sys/atomic.h>
 
+#include "reader_git.h" /* generated at build time (CMakeLists.txt) */
+
 #ifndef READER_GIT
 #define READER_GIT "unknown"
 #endif
@@ -54,7 +56,13 @@ BUILD_ASSERT(CFG_AVERAGED == 0x19FD, "RD-06: Averaged configuration register");
 #define SAMPLE_PERIOD_US 500
 #define QUEUE_DEPTH      4096
 #define OVF_REPORT_MS    1000
-#define TX_STALL_MS      50
+/* Data: tolerate a host stall up to about the queue's capacity (4096 samples at
+ * 2 kHz = 2.05 s); beyond that samples are dropped and counted (RD-09). */
+#define TX_STALL_DATA_MS  2000
+/* Replies: short, so a missing host never blocks the command thread for long. */
+#define TX_STALL_REPLY_MS 200
+/* vbus: an Averaged conversion (68.1 ms) may be in progress, plus margin. */
+#define VBUS_TIMEOUT_MS   150
 
 enum run_cfg { CFG_NONE, RUN_TRACE, RUN_AVERAGED };
 
@@ -81,31 +89,34 @@ static struct k_timer tick;
 static atomic_t running;
 static enum run_cfg run_cfg;
 static uint32_t seq_next;       /* samples taken this run (sampler only) */
-static atomic_t ovf_total;      /* samples dropped because the queue was full */
+static atomic_t ovf_total;      /* samples lost before the host: queue full or writer gave up */
+static atomic_t i2c_err_total;  /* failed shunt reads (not overflows) */
 static atomic_t writer_busy;
 static uint64_t t0_cycles;
 
 /* --- USB transmit --------------------------------------------------------- */
 
 /* Write len bytes to the USB FIFO (fifo_fill flushes a full packet per call,
- * unlike poll_out which flushes per byte). Gives up if the host stops reading. */
-static void usb_write(const char *buf, size_t len)
+ * unlike poll_out which flushes per byte). Gives up if the host makes no
+ * progress for stall_ms. Returns the number of bytes actually written. */
+static size_t usb_write(const char *buf, size_t len, int stall_ms)
 {
+	size_t done = 0;
 	int64_t last_progress = k_uptime_get();
 
-	while (len > 0) {
-		int n = uart_fifo_fill(usb, (const uint8_t *)buf, (int)len);
+	while (done < len) {
+		int n = uart_fifo_fill(usb, (const uint8_t *)buf + done, (int)(len - done));
 
 		if (n > 0) {
-			buf += n;
-			len -= n;
+			done += n;
 			last_progress = k_uptime_get();
-		} else if (k_uptime_get() - last_progress > TX_STALL_MS) {
-			return; /* no host connected: drop rather than block */
+		} else if (k_uptime_get() - last_progress > stall_ms) {
+			break; /* host not reading: drop rather than block forever */
 		} else {
 			k_busy_wait(100);
 		}
 	}
+	return done;
 }
 
 static void reply(const char *fmt, ...) __printf_like(1, 2);
@@ -126,7 +137,7 @@ static void reply(const char *fmt, ...)
 	line[n++] = '\n';
 
 	k_mutex_lock(&tx_lock, K_FOREVER);
-	usb_write(line, n);
+	(void)usb_write(line, n, TX_STALL_REPLY_MS);
 	k_mutex_unlock(&tx_lock);
 }
 
@@ -150,14 +161,16 @@ static int ina_read(uint8_t reg, uint16_t *val)
 	return ret;
 }
 
-/* RD-12: one triggered bus conversion, then back to the idle configuration. */
+/* RD-12: one triggered bus conversion, then back to the idle configuration.
+ * Returns mV, -ETIMEDOUT if CNVR never set within VBUS_TIMEOUT_MS, or another
+ * negative errno for an I2C failure. */
 static int vbus_snapshot_mv(void)
 {
 	uint16_t bus = 0;
 	int ret = ina_write(INA219_REG_CONFIG, CFG_VBUS);
 
 	if (ret == 0) {
-		int64_t deadline = k_uptime_get() + 10;
+		int64_t deadline = k_uptime_get() + VBUS_TIMEOUT_MS;
 
 		do {
 			k_msleep(1);
@@ -220,7 +233,9 @@ static void sampler_thread(void *a, void *b, void *c)
 				.phase = phase,
 			};
 
-			if (err != 0 || k_msgq_put(&sample_q, &s, K_NO_WAIT) != 0) {
+			if (err != 0) {
+				atomic_inc(&i2c_err_total); /* RD-09: shows as a seq gap on the host */
+			} else if (k_msgq_put(&sample_q, &s, K_NO_WAIT) != 0) {
 				atomic_inc(&ovf_total); /* RD-09: shows as a seq gap on the host */
 			}
 		}
@@ -238,23 +253,37 @@ static void writer_thread(void *a, void *b, void *c)
 
 	static char out[1024];
 	atomic_val_t reported = 0;
+	atomic_val_t reported_i2c = 0;
 	int64_t last_report = k_uptime_get();
 
 	for (;;) {
 		struct sample s;
 		size_t len = 0;
+		size_t lines = 0;
 
 		if (k_msgq_get(&sample_q, &s, K_MSEC(10)) == 0) {
 			atomic_set(&writer_busy, 1);
 			do {
+				lines++;
 				len += snprintk(out + len, sizeof(out) - len, "%u,%llu,%d,%u%u\n",
 						s.seq, s.t_us, s.shunt, (s.phase >> 1) & 1,
 						s.phase & 1);
 			} while (sizeof(out) - len > 64 && k_msgq_get(&sample_q, &s, K_NO_WAIT) == 0);
 
 			k_mutex_lock(&tx_lock, K_FOREVER);
-			usb_write(out, len);
+			size_t done = usb_write(out, len, TX_STALL_DATA_MS);
+
 			k_mutex_unlock(&tx_lock);
+			if (done < len) {
+				/* Host stalled longer than the queue could cover: count every
+				 * line not fully written (a straddling line is lost too). */
+				size_t sent = 0;
+
+				for (size_t i = 0; i < done; i++) {
+					sent += (out[i] == '\n');
+				}
+				atomic_add(&ovf_total, (atomic_val_t)(lines - sent));
+			}
 			atomic_set(&writer_busy, 0);
 		}
 
@@ -265,6 +294,11 @@ static void writer_thread(void *a, void *b, void *c)
 			if (now != reported) {
 				reported = now;
 				reply("# ovf %ld", (long)now);
+			}
+			now = atomic_get(&i2c_err_total);
+			if (now != reported_i2c) {
+				reported_i2c = now;
+				reply("# i2c_err %ld", (long)now);
 			}
 		}
 	}
@@ -286,6 +320,7 @@ static void cmd_start(enum run_cfg cfg)
 	run_cfg = cfg;
 	seq_next = 0;
 	atomic_set(&ovf_total, 0);
+	atomic_set(&i2c_err_total, 0);
 	k_msgq_purge(&sample_q);
 	reply("# started %s 0x%04X", cfg == RUN_TRACE ? "trace" : "averaged", reg);
 
@@ -297,6 +332,9 @@ static void cmd_start(enum run_cfg cfg)
 
 static void cmd_stop(void)
 {
+	/* Elapsed run time at stop: lets the host weight the last Averaged value. */
+	uint64_t stop_t_us = k_cyc_to_us_floor64(k_cycle_get_64() - t0_cycles);
+
 	atomic_set(&running, 0);
 	k_timer_stop(&tick);
 	k_sem_take(&sampler_idle, K_FOREVER);
@@ -304,7 +342,8 @@ static void cmd_stop(void)
 		k_msleep(2);
 	}
 	(void)ina_write(INA219_REG_CONFIG, CFG_IDLE);
-	reply("# stopped n=%u ovf=%ld", seq_next, (long)atomic_get(&ovf_total));
+	reply("# stopped n=%u ovf=%ld i2c=%ld t_us=%llu", seq_next, (long)atomic_get(&ovf_total),
+	      (long)atomic_get(&i2c_err_total), stop_t_us);
 }
 
 static void handle_command(char *line)
@@ -320,7 +359,9 @@ static void handle_command(char *line)
 		}
 		int mv = vbus_snapshot_mv();
 
-		if (mv < 0) {
+		if (mv == -ETIMEDOUT) {
+			reply("# err timeout");
+		} else if (mv < 0) {
 			reply("# err i2c");
 		} else {
 			reply("# vbus_mV %d", mv);

@@ -42,8 +42,14 @@ class ParseLine(unittest.TestCase):
         self.assertIsNone(record.parse_ovf("# started trace 0x199D"))
 
     def test_stopped_line(self):
-        self.assertEqual(record.parse_stopped("# stopped n=9 ovf=4"), (9, 4))
+        self.assertEqual(record.parse_stopped("# stopped n=9 ovf=4"), (9, 4, None, None))
+        self.assertEqual(record.parse_stopped("# stopped n=9 ovf=4 i2c=2 t_us=4500"),
+                         (9, 4, 2, 4500))
         self.assertIsNone(record.parse_stopped("# ovf 4"))
+
+    def test_i2c_err_line(self):
+        self.assertEqual(record.parse_i2c_err("# i2c_err 7"), 7)
+        self.assertIsNone(record.parse_i2c_err("# err i2c"))
 
     def test_vbus_line(self):
         self.assertEqual(record.parse_vbus("# vbus_mV 4980"), 4980)
@@ -100,10 +106,40 @@ class Stats(unittest.TestCase):
         s = self.feed(["0,0,2,00", "1,500,4,00"])
         self.assertEqual(s.shunt_mean, 3.0)
 
+    def test_i2c_errors_are_not_overflows(self):
+        s = self.feed(["0,0,1,00", "# i2c_err 5", "# stopped n=9 ovf=0 i2c=7 t_us=4000"])
+        self.assertEqual(s.i2c_errors, 7)
+        self.assertEqual(s.overflows, 0)
+
+    def test_malformed_lines_are_counted_not_dropped_silently(self):
+        s = self.feed(["0,0,1,00", "1,500,1", "garbage", "", "# err something", "2,1000,1,00"])
+        self.assertEqual(s.malformed_lines, 2)   # blank and '#' lines are not malformed
+        self.assertEqual(s.samples, 2)
+
+    def test_timeweighted_mean_weights_by_hold_time(self):
+        # Averaged emits on change: 100 held 9 ms, 200 held 1 ms until stop at 10 ms
+        s = self.feed(["0,0,100,00", "1,9000,200,00", "# stopped n=2 ovf=0 i2c=0 t_us=10000"])
+        self.assertAlmostEqual(s.shunt_mean, 150.0)
+        self.assertAlmostEqual(s.shunt_mean_timeweighted, 110.0)
+
+    def test_timeweighted_mean_without_stop_time_drops_the_last_value(self):
+        s = self.feed(["0,0,100,00", "1,9000,200,00"])
+        self.assertAlmostEqual(s.shunt_mean_timeweighted, 100.0)
+
+    def test_timeweighted_mean_of_empty_stream(self):
+        self.assertEqual(record.StreamStats().shunt_mean_timeweighted, 0.0)
+
     def test_summary_text_mentions_everything(self):
         text = record.format_summary(self.feed(STREAM))
-        for needle in ["samples", "gaps", "overflow", "mean interval", "532"]:
+        for needle in ["samples", "gaps", "overflow", "i2c errors", "malformed", "mean interval",
+                       "532", "time-weighted"]:
             self.assertIn(needle, text)
+
+    def test_summary_reports_current_when_converting(self):
+        conv = {"r_eff_ohm": 0.1, "offset_lsb": -2.0, "offset_source": "zero-run"}
+        text = record.format_summary(self.feed(["0,0,48,00", "1,500,48,00"]), conv)
+        self.assertIn("5.000 mA", text)
+        self.assertIn("zero-run", text)
 
 
 class Naming(unittest.TestCase):
@@ -125,15 +161,103 @@ class Naming(unittest.TestCase):
 
 
 class Calibration(unittest.TestCase):
-    def test_committed_file_is_nominal_uncalibrated(self):
+    def test_committed_file_is_the_2026_11_05_calibration(self):
         cal = record.load_calibration()
-        self.assertEqual(cal["r_eff_ohm"], 0.1)
-        self.assertIs(cal["calibrated"], False)
+        self.assertEqual(cal["r_eff_ohm"], 0.10101)
+        self.assertIs(cal["calibrated"], True)
+        self.assertEqual(cal["offset_lsb"], -2.442)
+        self.assertEqual(cal["loads_ohm"], [47, 100, 220, 1000])
+
+    def test_r_eff_is_the_least_squares_fit_of_the_recorded_readings(self):
+        cal = record.load_calibration()
+        v = [r["v_shunt_mV"] for r in cal["readings"]]
+        i = [r["meter_mA"] for r in cal["readings"]]
+        fit = sum(a * b for a, b in zip(v, i)) / sum(b * b for b in i)
+        self.assertAlmostEqual(fit, cal["r_eff_ohm"], places=5)
+        for r in cal["readings"]:  # v_shunt is the offset-corrected mean
+            self.assertAlmostEqual((r["mean_shunt_raw"] - cal["offset_lsb"]) * 0.01,
+                                   r["v_shunt_mV"], places=4)
 
     def test_current_ma(self):
         # 0.01 mV / 0.1 ohm = 0.1 mA per LSB
         self.assertAlmostEqual(record.shunt_raw_to_ma(-3, 0.1), -0.3)
         self.assertAlmostEqual(record.shunt_raw_to_ma(1000, 0.1), 100.0)
+
+    def test_current_ma_subtracts_the_offset(self):
+        # raw -2.5 with offset -2.5 is zero current; 47.5 is 50 LSB above it
+        self.assertAlmostEqual(record.shunt_raw_to_ma(-2.5, 0.1, -2.5), 0.0)
+        self.assertAlmostEqual(record.shunt_raw_to_ma(47.5, 0.1, -2.5), 5.0)
+
+
+def write_zero_sidecar(d, stem, start_time, offset, zero=True):
+    side = {"start_time": start_time, "zero_offset_lsb": offset}
+    if zero:
+        side["zero"] = True
+    Path(d, stem + ".json").write_text(json.dumps(side))
+
+
+class SessionZero(unittest.TestCase):
+    NOW = datetime(2026, 11, 5, 19, 0, 0)
+
+    def test_picks_latest_zero_before_the_run(self):
+        with tempfile.TemporaryDirectory() as d:
+            write_zero_sidecar(d, "a", "2026-11-05T09:00:00", -2.1)
+            write_zero_sidecar(d, "b", "2026-11-05T18:00:00", -2.4)
+            write_zero_sidecar(d, "c", "2026-11-05T19:30:00", -9.9)   # after the run
+            self.assertEqual(record.find_session_zero(d, self.NOW), (-2.4, "b"))
+
+    def test_ignores_non_zero_runs_and_other_sessions(self):
+        with tempfile.TemporaryDirectory() as d:
+            write_zero_sidecar(d, "dut", "2026-11-05T18:00:00", -1.0, zero=False)
+            write_zero_sidecar(d, "old", "2026-11-04T10:00:00", -2.3)  # > 12 h earlier
+            Path(d, "broken.json").write_text("{not json")
+            self.assertIsNone(record.find_session_zero(d, self.NOW))
+
+    def test_resolve_offset_precedence(self):
+        cal = {"offset_lsb": -2.442}
+        with tempfile.TemporaryDirectory() as d:
+            args = record.parse_args(["--port", "C", "--app", "a", "--run", "1"])
+            self.assertEqual(record.resolve_offset(args, cal, d, self.NOW),
+                             (-2.442, "calibration.json"))
+            write_zero_sidecar(d, "z", "2026-11-05T18:50:00", -2.5)
+            self.assertEqual(record.resolve_offset(args, cal, d, self.NOW), (-2.5, "z"))
+            args = record.parse_args(["--port", "C", "--app", "a", "--run", "1",
+                                      "--offset-lsb", "-1"])
+            self.assertEqual(record.resolve_offset(args, cal, d, self.NOW), (-1.0, "--offset-lsb"))
+
+
+class FakeSerial:
+    """pyserial stand-in: each read() hands back the next scripted chunk."""
+
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+
+    @property
+    def in_waiting(self):
+        return len(self.chunks[0]) if self.chunks else 0
+
+    def read(self, n):
+        return self.chunks.pop(0) if self.chunks else b""
+
+
+class BulkSerialPort(unittest.TestCase):
+    def make(self, chunks):
+        port = record.SerialPort.__new__(record.SerialPort)   # skip opening a real port
+        port._ser = FakeSerial(chunks)
+        port._lines = record.collections.deque()
+        port._partial = b""
+        return port
+
+    def test_partial_line_survives_a_read_timeout(self):
+        port = self.make([b"0,0,1,00\n1,50", b"", b"0,2,00\n"])
+        got = [port.readline() for _ in range(5)]
+        self.assertEqual(got, ["0,0,1,00", None, "1,500,2,00", None, None])
+
+    def test_many_lines_in_one_read(self):
+        port = self.make([b"0,0,1,00\r\n1,500,1,00\r\n# ovf 1\r\n"])
+        got = [port.readline() for _ in range(4)]
+        self.assertEqual(got, ["0,0,1,00", "1,500,1,00", "# ovf 1", None])
+        self.assertFalse(port.has_partial_line())
 
 
 class FakeReader:
@@ -184,7 +308,8 @@ class RunSequence(unittest.TestCase):
                 "--port", "COM9", "--config", "trace", "--app", "net-smoke",
                 "--run", "1", "--out", d, "--dut-commit", "abc123", "--note", "hi",
             ])
-            summary = record.run(port, args, now=datetime(2026, 11, 3, 21, 0, 0))
+            result = record.run(port, args, now=datetime(2026, 11, 3, 21, 0, 0))
+            summary = result.summary
             stem = "20261103-210000_net-smoke_trace_r1"
             csv_lines = Path(d, stem + ".csv").read_text().splitlines()
             side = json.loads(Path(d, stem + ".json").read_text())
@@ -198,8 +323,14 @@ class RunSequence(unittest.TestCase):
         self.assertEqual(side["reader_id"], "v0.1 2026-11-03")
         self.assertEqual(side["config"], "trace")
         self.assertEqual(side["config_register"], "0x199D")
-        self.assertEqual(side["r_eff_ohm"], 0.1)
-        self.assertIs(side["r_eff_calibrated"], False)
+        self.assertEqual(side["r_eff_ohm"], 0.10101)
+        self.assertIs(side["r_eff_calibrated"], True)
+        self.assertEqual(side["offset_lsb"], -2.442)
+        self.assertEqual(side["offset_source"], "calibration.json")
+        self.assertEqual(side["i2c_errors"], 0)
+        self.assertEqual(side["malformed_lines"], 0)
+        self.assertNotIn("zero", side)
+        self.assertIn("shunt_mean_raw_timeweighted", side)
         self.assertEqual(side["vbus_mV_start"], 4990)
         self.assertEqual(side["vbus_mV_end"], 4985)
         self.assertEqual(side["samples"], 6)
@@ -212,6 +343,8 @@ class RunSequence(unittest.TestCase):
         self.assertIn("interval_mean_us", side)
         self.assertNotIn("dtim_period", side)               # unset flags omitted
         self.assertIn("samples", summary)
+        self.assertIn("mean current", summary)
+        self.assertEqual(result.warnings, [])
 
     def test_start_while_running_reports_reader_error(self):
         class Busy(FakeReader):
@@ -230,15 +363,59 @@ class RunSequence(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "busy"):
                 record.run(port, args)
 
-    def test_sidecar_written_even_if_final_vbus_fails(self):
-        port = FakeReader("# id x y", ["# vbus_mV 4990", "# err busy"], STREAM[1:-1], STREAM[-1])
+    def test_failed_final_vbus_keeps_the_summary_and_the_sidecar(self):
+        port = FakeReader("# id x y", ["# vbus_mV 4990", "# err timeout"],
+                          STREAM[1:-1], STREAM[-1])
         with tempfile.TemporaryDirectory() as d:
             args = record.parse_args(["--port", "C", "--app", "a", "--run", "1", "--out", d])
-            with self.assertRaises(RuntimeError):
-                record.run(port, args, now=datetime(2026, 11, 3, 21, 0, 0))
+            result = record.run(port, args, now=datetime(2026, 11, 3, 21, 0, 0))
             side = json.loads(Path(d, "20261103-210000_a_trace_r1.json").read_text())
+        self.assertIn("samples", result.summary)
+        self.assertEqual(len(result.warnings), 1)
+        self.assertIn("timeout", result.warnings[0])
         self.assertEqual(side["samples"], 6)
-        self.assertNotIn("vbus_mV_end", side)
+        self.assertIsNone(side["vbus_mV_end"])
+        self.assertIn("timeout", side["vbus_error"])
+
+    def test_zero_run_is_marked_and_used_by_the_next_run(self):
+        zero_stream = ["0,0,-2,00", "1,500,-3,00", "2,1000,-2,00", "3,1500,-3,00"]
+        zero_stopped = "# stopped n=4 ovf=0 i2c=0 t_us=2000"
+        with tempfile.TemporaryDirectory() as d:
+            args = record.parse_args(["--port", "C", "--app", "acceptance", "--run", "1",
+                                      "--zero", "--out", d])
+            self.assertEqual((args.config, args.label), ("trace", "zero"))
+            port = FakeReader("# id x y", ["# vbus_mV 5000", "# vbus_mV 5000"],
+                              zero_stream, zero_stopped)
+            result = record.run(port, args, now=datetime(2026, 11, 5, 18, 0, 0))
+            zero_side = json.loads(Path(d, "20261105-180000_acceptance_zero_r1.json").read_text())
+            self.assertIn("-2.500 LSB", result.summary)
+            self.assertIs(zero_side["zero"], True)
+            self.assertEqual(zero_side["zero_offset_lsb"], -2.5)
+
+            args = record.parse_args(["--port", "C", "--app", "a", "--run", "2", "--out", d])
+            port = FakeReader("# id x y", ["# vbus_mV 5000", "# vbus_mV 5000"],
+                              STREAM[1:-1], STREAM[-1])
+            record.run(port, args, now=datetime(2026, 11, 5, 18, 30, 0))
+            side = json.loads(Path(d, "20261105-183000_a_trace_r2.json").read_text())
+        self.assertEqual(side["offset_lsb"], -2.5)
+        self.assertEqual(side["offset_source"], "20261105-180000_acceptance_zero_r1")
+        self.assertNotIn("zero", side)
+
+    def test_zero_rejects_averaged(self):
+        with self.assertRaises(SystemExit):
+            record.parse_args(["--port", "C", "--app", "a", "--run", "1", "--zero",
+                               "--config", "averaged"])
+
+    def test_malformed_lines_reach_the_sidecar(self):
+        data = ["0,0,1,00", "1,500,1", "2,1000,1,00"]
+        port = FakeReader("# id x y", ["# vbus_mV 1", "# vbus_mV 1"], data,
+                          "# stopped n=3 ovf=0 i2c=1 t_us=1500")
+        with tempfile.TemporaryDirectory() as d:
+            args = record.parse_args(["--port", "C", "--app", "a", "--run", "1", "--out", d])
+            record.run(port, args, now=datetime(2026, 11, 3, 21, 0, 0))
+            side = json.loads(Path(d, "20261103-210000_a_trace_r1.json").read_text())
+        self.assertEqual(side["malformed_lines"], 1)
+        self.assertEqual(side["i2c_errors"], 1)
 
     def test_required_args(self):
         with self.assertRaises(SystemExit):

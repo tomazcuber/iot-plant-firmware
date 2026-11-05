@@ -1,9 +1,20 @@
 {
-  "r_eff_ohm": 0.1,
-  "calibrated": false,
-  "date": null,
-  "meter": null,
-  "loads_ohm": [],
-  "readings": [],
-  "note": "Nominal module shunt (R100). Replaced by the derived value after RD-17 check 2."
+  "r_eff_ohm": 0.10101,
+  "calibrated": true,
+  "date": "2026-11-05",
+  "meter": "Hikari HM-1001",
+  "method": "least squares through the origin, R_eff = sum(V*I) / sum(I^2), V = (mean shunt_raw - offset_lsb) x 0.01 mV, I = meter current; all four loads",
+  "offset_lsb": -2.442,
+  "offset_date": "2026-11-05",
+  "offset_source": "mean of the 2026-11-05 session zeros (start -2.41, end -2.474); VIN- open, Trace",
+  "offset_note": "Default only. Each measurement session takes its own zero (record.py --zero) and runs are converted with the latest zero of the session.",
+  "loads_ohm": [47, 100, 220, 1000],
+  "readings": [
+    {"load_ohm": 100, "run": "20261105-193308_acceptance_c2-cal-100R_r1", "mean_shunt_raw": 467.085, "v_shunt_mV": 4.69527, "meter_mA": 46.35, "meter_range": "200m", "r_point_ohm": 0.10130},
+    {"load_ohm": 220, "run": "20261105-193629_acceptance_c3-acc-220R_r1", "mean_shunt_raw": 214.954, "v_shunt_mV": 2.17396, "meter_mA": 21.5, "meter_range": "200m", "r_point_ohm": 0.10111},
+    {"load_ohm": 47, "run": "20261105-193931_acceptance_c3-acc-47R_r1", "mean_shunt_raw": 964.015, "v_shunt_mV": 9.66457, "meter_mA": 95.75, "meter_range": "200m", "r_point_ohm": 0.10094},
+    {"load_ohm": 1000, "run": "20261105-194242_acceptance_c3-acc-1k_r1", "mean_shunt_raw": 48.053, "v_shunt_mV": 0.50495, "meter_mA": 5.04, "meter_range": "20m", "r_point_ohm": 0.10019}
+  ],
+  "residuals_percent": {"100": 0.29, "220": 0.11, "47": -0.07, "1000": -0.81},
+  "note": "Absolute uncertainty is bounded by the HM-1001 DC-current rating (about 1.2-2 percent in the ranges used). The 47 ohm point drifted (carbon-film heating), meter 95.5 -> 96.0 mA, midpoint used."
 }
