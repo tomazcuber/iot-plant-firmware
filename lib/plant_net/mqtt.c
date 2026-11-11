@@ -64,6 +64,13 @@ static int resolve_broker(const char *host)
 	return 0;
 }
 
+static int drop_connection(void)
+{
+	connected = false;
+	mqtt_abort(&client);
+	return -ENOTCONN;
+}
+
 static int wait_socket(int32_t timeout_ms)
 {
 	struct zsock_pollfd fds = {
@@ -213,14 +220,16 @@ int plant_mqtt_poll(int32_t timeout_ms)
 	if (ret == 0) {
 		ret = mqtt_input(&client);
 		if (ret < 0) {
-			connected = false;
-			mqtt_abort(&client);
-			return -ENOTCONN;
+			return drop_connection();
 		}
 	} else if (ret != -EAGAIN) {
-		connected = false;
-		mqtt_abort(&client);
-		return -ENOTCONN;
+		return drop_connection();
+	}
+
+	/* A PINGREQ still unanswered when the next one is due means the link is
+	 * silently dead (the write alone only reaches the TCP buffer). */
+	if (client.unacked_ping > 0 && mqtt_keepalive_time_left(&client) == 0) {
+		return drop_connection();
 	}
 
 	ret = mqtt_live(&client);
@@ -229,9 +238,7 @@ int plant_mqtt_poll(int32_t timeout_ms)
 		ret = 0;
 	}
 	if (ret < 0) {
-		connected = false;
-		mqtt_abort(&client);
-		return -ENOTCONN;
+		return drop_connection();
 	}
 	return connected ? 0 : -ENOTCONN;
 }
