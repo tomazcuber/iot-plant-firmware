@@ -1,5 +1,4 @@
-/* plant_net: blocking WiFi / SNTP primitives (SM-40, SM-41).
- * MQTT primitives are added by a later slice.
+/* plant_net: blocking WiFi / SNTP / MQTT primitives (SM-40, SM-41).
  * Not thread-safe: call everything from one thread. */
 #ifndef PLANT_NET_H
 #define PLANT_NET_H
@@ -27,6 +26,24 @@ int plant_wifi_rssi(int16_t *rssi_dbm);
 /* Query CONFIG_PLANT_NET_SNTP_SERVER. On success, *epoch_ms is wall-clock time
  * in ms since the Unix epoch at the moment of return. -ETIMEDOUT on timeout. */
 int plant_sntp_sync(int32_t timeout_ms, int64_t *epoch_ms);
+
+/* Resolve broker_host (IPv4 literal or DNS name), open TCP to
+ * CONFIG_PLANT_NET_MQTT_PORT, send CONNECT with client_id, wait for CONNACK.
+ * client_id must be shorter than 64 bytes. -ETIMEDOUT on expiry,
+ * -ECONNREFUSED if the broker rejects the CONNECT. */
+int plant_mqtt_connect(const char *broker_host, const char *client_id,
+		       int32_t timeout_ms);
+
+/* Publish at QoS 0 (FR-MA-11). -ENOTCONN if not connected. */
+int plant_mqtt_publish(const char *topic, const char *payload, size_t len);
+
+/* Wait up to timeout_ms for incoming packets and send a keepalive PINGREQ
+ * when due (never sleeps past the due time). Returns 0, or -ENOTCONN if the
+ * connection dropped. */
+int plant_mqtt_poll(int32_t timeout_ms);
+
+/* Send DISCONNECT and close the socket. */
+int plant_mqtt_disconnect(void);
 
 #ifdef __cplusplus
 }

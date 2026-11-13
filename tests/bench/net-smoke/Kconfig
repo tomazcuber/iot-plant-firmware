@@ -6,6 +6,17 @@ config SMOKE_WIFI_SSID
 config SMOKE_WIFI_PSK
 	string "WiFi PSK"
 
+config SMOKE_BROKER_HOST
+	string "MQTT broker host (IPv4 literal or DNS name)"
+
+config SMOKE_DEVICE_NAME
+	string "Device name (MQTT client ID and topic segment)"
+	default "net-smoke"
+
+config SMOKE_KEEPALIVE_WAIT_S
+	int "Seconds to poll after publishing (>= several keepalive intervals)"
+	default 200
+
 config SMOKE_CONNECT_TIMEOUT_MS
 	int "plant_wifi_connect timeout (ms)"
 	default 30000
