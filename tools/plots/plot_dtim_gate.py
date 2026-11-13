@@ -164,6 +164,7 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     plt.rcParams.update({
+        "font.family": "serif", "font.serif": ["Times New Roman", "Times", "DejaVu Serif"],
         "font.size": 9, "axes.titlesize": 9, "axes.labelsize": 9,
         "xtick.labelsize": 8.5, "ytick.labelsize": 8.5,
         "pdf.fonttype": 42, "axes.unicode_minus": True,
