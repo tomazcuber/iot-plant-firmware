@@ -1,6 +1,6 @@
 # IoT Plant Monitor Firmware
 
-Firmware for a Bachelor's thesis on the energy profile of a low-power IoT plant-monitoring device. The repo ships one product firmware (`apps/main`), two `Baseline firmware`s (`apps/static-sleep`, `apps/active-ble`) that characterise individual terms of the thesis energy model, and one `Comparison baseline` (`apps/active-wifi`). `apps/active-sensor` is superseded and not built.
+Firmware for a Bachelor's thesis on the energy profile of a low-power IoT plant-monitoring device. The repo ships one product firmware (`apps/main`), one `Baseline firmware` (`apps/static-sleep`) that supplies `I_sleep`, and one `Comparison baseline` (`apps/active-wifi`). The thesis's core result is the measured energy comparison between `apps/main` and `apps/active-wifi`. `apps/active-sensor` and `apps/active-ble` are cut from the thesis and not built.
 
 ## Language
 
@@ -67,15 +67,15 @@ _Avoid_: sample, observation, sensor data, raw payload, reading (unqualified).
 ### Energy model & measurement
 
 **Energy model**:
-The equation `E_cycle = (I_sleep × t_sleep + I_boot × t_boot + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V`. The thesis deliverable. Every measurement and instrumentation choice in the repo exists to populate one of its terms.
+The equation `E_cycle = (I_sleep × t_sleep + I_boot × t_boot + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V`. A *descriptive* breakdown of where `apps/main`'s energy per `Cycle` goes, populated from `apps/main`'s `Current trace` plus `I_sleep` from `apps/static-sleep`. Not the thesis deliverable: the deliverable is the measured comparison of `apps/main`'s energy per `Cycle` against comparison baseline A's energy per publication, both taken directly from the `Current trace`, at intervals of 60 s and 300 s.
 _Avoid_: energy equation, power model (power is `I × V`, not the whole model).
 
 **Baseline firmware**:
-An app that strips the device down to a single steady-state behaviour so that one `Current draw` term can be measured where the product firmware's current trace can't resolve it. Two exist: `apps/static-sleep` (`I_sleep`, the primary source) and `apps/active-ble` (cross-check for `I_ble`). Not tests, not production code paths; their sole output is a number measured *off-device*.
+An app that strips the device down to a single steady-state behaviour so that one `Current draw` term can be measured where the product firmware's current trace can't resolve it. One exists: `apps/static-sleep` (`I_sleep`). `apps/active-ble` (formerly a cross-check for `I_ble`) is cut; `I_ble` comes only from `apps/main`'s trace. Not tests, not production code paths; their sole output is a number measured *off-device*.
 _Avoid_: test firmware, measurement app, baseline app.
 
 **Comparison baseline**:
-An app that implements an alternative architecture from the literature so its energy can be compared against `apps/main`'s. It shares `apps/main`'s per-publish workload and stack, so the comparison isolates the architecture. One exists: comparison baseline A (`apps/active-wifi`), always connected and never sleeping. It populates no `Current draw` term.
+An app that implements an alternative architecture from the literature so its energy can be compared against `apps/main`'s. It shares `apps/main`'s per-publish workload and stack, so the comparison isolates the architecture. One exists: comparison baseline A (`apps/active-wifi`), always connected and never sleeping. Its result is its energy per publication, `I_A × V × interval`, where `I_A` is the mean current over a whole number of publication intervals; it is compared against `apps/main`'s energy per `Cycle` at the same interval. It populates no `Current draw` term. Each publication is counted in `status.cycle_count` even though baseline A has no `Cycle` (it never sleeps); the counter is a RAM publication counter, so skipped publications show as gaps.
 _Avoid_: baseline (unqualified — collides with `Baseline firmware`), reference firmware, naive firmware.
 
 **Current draw**:
@@ -97,7 +97,7 @@ The bench instrument that samples the INA219 and streams the `Current trace` to 
 _Avoid_: second board, logger, sampler, meter (reserved for the multimeter).
 
 **Reader configuration**:
-How the `Reader` samples during a `Run`. Two values: **Trace** (one 12-bit conversion per sample, no averaging, for phase-resolved traces) and **Averaged** (128-sample hardware averaging, for steady-state means such as `active-ble`).
+How the `Reader` samples during a `Run`. Two values: **Trace** (one 12-bit conversion per sample, no averaging, for phase-resolved traces) and **Averaged** (128-sample hardware averaging, for steady-state means such as `static-sleep`).
 _Avoid_: mode (reserved for the `Device`'s `Mode`), profile.
 
 **Run**:

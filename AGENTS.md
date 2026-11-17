@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues live as local markdown under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+Firmware issues live on GitHub (`gh issue`); only the MQTT-backend plan stays under `.scratch/mqtt-backend/`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

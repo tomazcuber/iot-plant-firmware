@@ -1,0 +1,20 @@
+mainmenu "Comparison baseline A (active-wifi)"
+
+config APP_PUBLISH_INTERVAL_S
+	int "Publication interval (s), equal to main's read_interval_s"
+	default 300
+	range 10 86400
+	help
+	  Set per experiment condition with interval-60.conf / interval-300.conf
+	  (FR-AW-03), never on the command line.
+
+config APP_WIFI_SSID
+	string "WiFi SSID"
+
+config APP_WIFI_PSK
+	string "WiFi PSK"
+
+config APP_MQTT_BROKER
+	string "MQTT broker host (IPv4 literal or DNS name)"
+
+source "Kconfig.zephyr"
