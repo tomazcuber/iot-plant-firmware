@@ -20,7 +20,7 @@ int plant_wifi_connect(const char *ssid, const char *psk, int32_t timeout_ms);
 /* Disassociate and bring the interface down. */
 int plant_wifi_disconnect(void);
 
-/* Current RSSI of the associated AP. */
+/* Current RSSI of the associated AP. -ENOTCONN if not associated. */
 int plant_wifi_rssi(int16_t *rssi_dbm);
 
 /* Query CONFIG_PLANT_NET_SNTP_SERVER. On success, *epoch_ms is wall-clock time
