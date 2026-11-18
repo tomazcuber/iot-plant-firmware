@@ -11,18 +11,17 @@ namespace plant {
 
 namespace {
 
-/* What the WiFi phase needs from the sensor phase. */
-struct Phase {
+/* The WiFi phase's inputs from the sensor phase, and the result it fills. */
+struct WifiPhase {
 	const CycleConfig &cfg;
 	const plant_sensor_values &values;
-	int64_t t_active_start_ms;
 	int64_t t_wifi_start_ms;
 	CycleResult &result;
 };
 
 /* Close the WiFi phase at the current uptime (FR-MA-16, cut early: see
  * CycleResult). t_active_ms = t_sensor_ms + t_wifi_ms + t_ble_ms, t_ble_ms = 0. */
-void stop_clock(Phase &p)
+void stop_clock(WifiPhase &p)
 {
 	p.result.t_wifi_ms = (uint32_t)(cycle_uptime_ms() - p.t_wifi_start_ms);
 	p.result.t_active_ms = p.result.t_sensor_ms + p.result.t_wifi_ms;
@@ -42,7 +41,7 @@ int publish(const char *device_name, const char *subtopic, const char *payload, 
 
 /* Steps 6-10, with WiFi associated: one SNTP attempt, MQTT connect, the two
  * publishes. Returns 0, or the error of the first step that failed. */
-int publish_cycle(Phase &p)
+int publish_cycle(WifiPhase &p)
 {
 	const CycleConfig &cfg = p.cfg;
 	plant_status status = {};
@@ -116,7 +115,7 @@ CycleResult run_cycle(const CycleConfig &cfg, int64_t t_active_start_ms)
 	(void)plant_sensors_init();
 	(void)plant_sensors_read(&values);
 
-	Phase p = {cfg, values, t_active_start_ms, cycle_uptime_ms(), result};
+	WifiPhase p = {cfg, values, cycle_uptime_ms(), result};
 
 	result.t_sensor_ms = (uint32_t)(p.t_wifi_start_ms - t_active_start_ms);
 

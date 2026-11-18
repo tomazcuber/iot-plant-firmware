@@ -1,4 +1,4 @@
-/* Host tests for apps/main's Active phase (issue #22): the wake-cycle call
+/* Host tests for apps/main's Active phase (issue #22): the Cycle's call
  * sequence (FR-MA-07), discard-on-failure (DD-MA-02), null fields
  * (FR-MA-08a, DD-MA-11) and the Phase durations in `status` (FR-MA-16).
  * The payloads come from the real plant_json encoder. */

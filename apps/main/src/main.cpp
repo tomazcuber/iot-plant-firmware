@@ -1,13 +1,13 @@
 /* apps/main, reduced for the thesis comparison (issue #22): a timer-only
- * deep-sleep Cycle. Each boot is one Cycle: run the Active phase, then sleep
- * for CONFIG_APP_READ_INTERVAL_S. There is no application loop; the RTC timer
+ * Cycle. Each boot is one Cycle: run the Active phase, then Sleep for
+ * CONFIG_APP_READ_INTERVAL_S. There is no application loop; the RTC timer
  * wake is a fresh boot. */
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/logging/log_ctrl.h>
 
 #include "cycle.h"
-#include "deep_sleep.h"
+#include "sleep.h"
 
 LOG_MODULE_REGISTER(main_app, LOG_LEVEL_WRN);
 
@@ -37,17 +37,20 @@ int main(void)
 
 	LOG_WRN("main: device %s, read interval %d s, %s", CONFIG_APP_DEVICE_NAME,
 		CONFIG_APP_READ_INTERVAL_S,
-		deep_sleep_woke_from_timer() ? "timer wake" : "cold boot");
+		sleep_woke_from_timer() ? "timer wake" : "cold boot");
 
 	const plant::CycleResult r = plant::run_cycle(cycle_cfg, t_active_start_ms);
 
 	if (r.error != 0) {
 		LOG_WRN("cycle not published: %d", r.error);
 	}
-	LOG_WRN("t_sensor %u ms, t_wifi %u ms, t_active %u ms", r.t_sensor_ms, r.t_wifi_ms,
-		r.t_active_ms);
+	/* The published t_active_ms stops before the teardown (cycle.h); the
+	 * time to Sleep entry includes it, for comparison with the trace. */
+	LOG_WRN("t_sensor %u ms, t_wifi %u ms, t_active %u ms, %u ms to sleep",
+		r.t_sensor_ms, r.t_wifi_ms, r.t_active_ms,
+		(uint32_t)(k_uptime_get() - t_active_start_ms));
 
 	/* Deferred logging: print everything before the power goes. */
 	LOG_PANIC();
-	deep_sleep_for(CONFIG_APP_READ_INTERVAL_S);
+	sleep_for(CONFIG_APP_READ_INTERVAL_S);
 }

@@ -18,4 +18,4 @@ endif()
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(main CXX C)
-target_sources(app PRIVATE src/main.cpp src/cycle.cpp src/deep_sleep_esp32.c)
+target_sources(app PRIVATE src/main.cpp src/cycle.cpp src/sleep_esp32.c)

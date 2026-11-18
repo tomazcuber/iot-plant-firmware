@@ -3,7 +3,7 @@
  * Zephyr-free so the host tests can run it (tests/host/test_main_cycle.cpp):
  * it reaches the hardware only through <plant/sensors.h> and <plant/net.h>,
  * and the clock only through cycle_uptime_ms(), which the app provides.
- * Waking up and going back to Sleep are the caller's job (deep_sleep.h). */
+ * Waking up and going back to Sleep are the caller's job (sleep.h). */
 #ifndef MAIN_CYCLE_H
 #define MAIN_CYCLE_H
 
