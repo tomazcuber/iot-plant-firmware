@@ -42,6 +42,14 @@ int plant_mqtt_publish(const char *topic, const char *payload, size_t len);
  * connection dropped. */
 int plant_mqtt_poll(int32_t timeout_ms);
 
+/* Send a PINGREQ and wait until every outstanding PINGREQ is answered. The
+ * transport is ordered, so a return of 0 means the broker has received
+ * everything sent before the call. Call it before tearing the link down
+ * right after publishing (apps/main, ADR-0010): a QoS 0 publish only reaches
+ * the TCP send buffer. -ETIMEDOUT on expiry, -ENOTCONN if not connected or
+ * the connection dropped. */
+int plant_mqtt_flush(int32_t timeout_ms);
+
 /* Send DISCONNECT and close the socket. */
 int plant_mqtt_disconnect(void);
 

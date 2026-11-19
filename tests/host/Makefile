@@ -1,9 +1,13 @@
 CC      ?= gcc
+CXX     ?= g++
 CFLAGS  += -std=c11 -Wall -Wextra -Werror -O0 -g
 CFLAGS  += -I../../include -I../../lib/plant_json/include -I../../lib/plant_net
 CFLAGS  += -I../../lib/plant_sensors/include
 
-TESTS := test_json test_net_util test_soil_calib test_active_wifi
+CXXFLAGS += -std=c++17 -Wall -Wextra -Werror -O0 -g
+CXXFLAGS += -I../../include -I../../lib/plant_json/include
+
+TESTS := test_json test_net_util test_soil_calib test_active_wifi test_main_cycle
 
 .PHONY: all clean $(TESTS)
 all: $(TESTS)
@@ -25,5 +29,14 @@ test_active_wifi: test_active_wifi.c ../../apps/active-wifi/src/link.c
 	$(CC) $(CFLAGS) -o $@ $^
 	./$@
 
+# apps/main is C++17 (DD-SM-02); the shared encoder stays C and is linked in.
+test_main_cycle: CXXFLAGS += -I../../lib/plant_net/include -I../../lib/plant_sensors/include
+test_main_cycle: CXXFLAGS += -I../../apps/main/src
+test_main_cycle: test_main_cycle.cpp ../../apps/main/src/cycle.cpp ../../lib/plant_json/json.c
+	$(CC) $(CFLAGS) -c -o json_main_cycle.o ../../lib/plant_json/json.c
+	$(CXX) $(CXXFLAGS) -o $@ test_main_cycle.cpp ../../apps/main/src/cycle.cpp json_main_cycle.o
+	rm -f json_main_cycle.o
+	./$@
+
 clean:
-	rm -f $(TESTS)
+	rm -f $(TESTS) json_main_cycle.o

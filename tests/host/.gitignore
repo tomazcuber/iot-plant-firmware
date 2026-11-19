@@ -2,3 +2,5 @@ test_json
 test_soil_calib
 test_net_util
 test_active_wifi
+test_main_cycle
+json_main_cycle.o

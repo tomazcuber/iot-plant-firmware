@@ -243,6 +243,49 @@ int plant_mqtt_poll(int32_t timeout_ms)
 	return connected ? 0 : -ENOTCONN;
 }
 
+int plant_mqtt_flush(int32_t timeout_ms)
+{
+	int64_t deadline;
+	int ret;
+
+	if (timeout_ms <= 0) {
+		return -EINVAL;
+	}
+	if (!connected) {
+		return -ENOTCONN;
+	}
+
+	deadline = k_uptime_get() + timeout_ms;
+
+	ret = mqtt_ping(&client);
+	if (ret < 0) {
+		return drop_connection();
+	}
+
+	/* Wait for every outstanding PINGREQ, not just for a PINGRESP event: a
+	 * late reply to an earlier keepalive would prove nothing about the
+	 * publishes sent after it. */
+	while (client.unacked_ping > 0) {
+		int64_t left = deadline - k_uptime_get();
+
+		if (left <= 0) {
+			return -ETIMEDOUT;
+		}
+		ret = wait_socket((int32_t)left);
+		if (ret == -EAGAIN) {
+			return -ETIMEDOUT;
+		}
+		if (ret < 0) {
+			return drop_connection();
+		}
+		ret = mqtt_input(&client);
+		if (ret < 0) {
+			return drop_connection();
+		}
+	}
+	return connected ? 0 : -ENOTCONN;
+}
+
 int plant_mqtt_disconnect(void)
 {
 	int ret;

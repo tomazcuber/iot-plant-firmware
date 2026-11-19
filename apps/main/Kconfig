@@ -1,25 +1,30 @@
 mainmenu "Plant Monitor — Main Application"
 
-menu "Soil Moisture Calibration"
+# Compile-time configuration of the reduced apps/main (issue #22): BLE
+# provisioning and Settings are cut, so these replace the Settings keys of
+# FR-MA-05a.
 
-config SOIL_DRY_ADC
-	int "Raw ADC value with probe in dry air"
-	default 3000
+config APP_READ_INTERVAL_S
+	int "Read interval (s): Sleep length between Cycles"
+	default 300
+	range 10 86400
 	help
-	  Raw ADC reading measured with the soil moisture probe in dry air.
-	  Upper reference for the two-point linear calibration curve.
-	  Must be characterised per-probe (see DD-MA-12) — the default is a
-	  placeholder for the YL-69 / HW-080 sensor family at 3.3V VCC and
-	  must be updated for the specific probe used in the deployment.
+	  Set per experiment condition with interval-60.conf / interval-300.conf,
+	  never on the command line.
 
-config SOIL_WET_ADC
-	int "Raw ADC value with probe fully submerged"
-	default 1500
+config APP_DEVICE_NAME
+	string "Device name (MQTT topic segment and client id)"
+	default "plant"
 	help
-	  Raw ADC reading measured with the soil moisture probe fully
-	  submerged in water. Lower reference for the two-point linear
-	  calibration curve. Must be characterised per-probe (see DD-MA-12).
+	  FR-MA-05 default. Shorter than 64 bytes (MQTT client id limit).
 
-endmenu
+config APP_WIFI_SSID
+	string "WiFi SSID"
+
+config APP_WIFI_PSK
+	string "WiFi PSK"
+
+config APP_MQTT_BROKER
+	string "MQTT broker host (IPv4 literal or DNS name)"
 
 source "Kconfig.zephyr"
