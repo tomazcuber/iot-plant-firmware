@@ -190,6 +190,7 @@ On each wake, the firmware shall execute the following sequence in order:
 8. Publish `sensors/raw` payload
 9. Capture `wifi_rssi_dbm` from the WiFi interface status (single sample, post-publish, pre-teardown — see DD-MA-13)
 10. Publish `status` payload
+10a. Confirm delivery: one PINGREQ/PINGRESP round trip with the broker before the link goes down ([ADR-0010](../../adr/0010-confirm-delivery-before-sleep.md)). An unconfirmed delivery fails the cycle like a failed publish.
 11. Disconnect MQTT; disconnect WiFi
 12. Record `t_ble_start` timestamp
 13. Start BLE advertising (`ble_window_s` window; skipped if 0)
@@ -394,8 +395,7 @@ CONFIG_BT_PERIPHERAL=y
 CONFIG_BT_GATT=y
 CONFIG_BT_DEVICE_NAME_DYNAMIC=y
 CONFIG_BT_DEVICE_NAME_MAX=20
-CONFIG_PM=y
-CONFIG_PM_DEVICE=y
+CONFIG_POWEROFF=y
 CONFIG_CPP=y
 CONFIG_STD_CPP17=y
 CONFIG_SETTINGS=y
@@ -447,6 +447,8 @@ The firmware supports both RTC timer wake (periodic) and RTC GPIO wake (soil moi
 
 ### DD-MA-02: MQTT QoS 0 and Discard-on-Failure
 On WiFi connection failure (timeout after 10 seconds), the current cycle's sensor data is discarded and the device returns to deep sleep. MQTT publishes use QoS 0.
+
+*Revised 2026-11-19:* QoS 0 still relies on TCP to deliver, so before the radio goes down the device waits for one PINGREQ/PINGRESP round trip that confirms the broker received the cycle's publishes ([ADR-0010](../../adr/0010-confirm-delivery-before-sleep.md)). There is still no per-message acknowledgement and no retry.
 
 **Rationale:** For plant monitoring, data consistency on network failure is low priority. Plants change slowly — soil moisture, temperature, and humidity shift over hours. A gap in the time-series caused by a WiFi outage is visible by timestamp but does not compromise plant health decisions or invalidate the dataset. QoS 0 minimises `t_active` by eliminating broker acknowledgement round-trips. Implementing local buffering (QoS 1/2 or NVS replay) would introduce non-uniform cycle energy profiles, complicating the thesis energy model.
 

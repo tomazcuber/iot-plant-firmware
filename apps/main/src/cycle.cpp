@@ -40,7 +40,8 @@ int publish(const char *device_name, const char *subtopic, const char *payload, 
 }
 
 /* Steps 6-10, with WiFi associated: one SNTP attempt, MQTT connect, the two
- * publishes. Returns 0, or the error of the first step that failed. */
+ * publishes and the delivery confirmation (ADR-0010). Returns 0, or the error
+ * of the first step that failed. */
 int publish_cycle(WifiPhase &p)
 {
 	const CycleConfig &cfg = p.cfg;
@@ -97,6 +98,11 @@ int publish_cycle(WifiPhase &p)
 	status.t_active_ms = p.result.t_active_ms;
 	len = plant_json_encode_status(&status, payload, sizeof(payload));
 	ret = publish(cfg.device_name, "status", payload, len);
+	if (ret == 0) {
+		/* QoS 0 only hands the payloads to the TCP send buffer. Before
+		 * the radio goes down, confirm the broker has both (ADR-0010). */
+		ret = plant_mqtt_flush(cfg.flush_timeout_ms);
+	}
 
 	(void)plant_mqtt_disconnect();
 	return ret;

@@ -26,6 +26,7 @@ const plant::CycleConfig cycle_cfg = {
 	10000, /* WiFi connect timeout (DD-MA-03) */
 	3000,  /* SNTP timeout (DD-MA-11) */
 	10000, /* MQTT connect timeout: not specified, matches baseline A */
+	5000,  /* delivery confirmation timeout (ADR-0010) */
 };
 
 } // namespace

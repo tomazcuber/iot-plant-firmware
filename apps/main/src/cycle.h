@@ -19,11 +19,12 @@ struct CycleConfig {
 	int32_t wifi_timeout_ms;
 	int32_t sntp_timeout_ms;
 	int32_t mqtt_timeout_ms;
+	int32_t flush_timeout_ms; /* delivery confirmation (ADR-0010) */
 };
 
 struct CycleResult {
-	/* 0 when both payloads were published, otherwise the error of the step
-	 * that failed. Publishing stops at the first failure (DD-MA-02). */
+	/* 0 when the broker confirmed both payloads, otherwise the error of the
+	 * step that failed. Publishing stops at the first failure (DD-MA-02). */
 	int error;
 	/* The Phase durations as published in `status` (FR-MA-16). Measured up
 	 * to the moment `status` is encoded: the MQTT and WiFi teardown that
@@ -38,8 +39,9 @@ struct CycleResult {
 int64_t cycle_uptime_ms();
 
 /* Run one Active phase: read the sensors, connect WiFi, try SNTP once,
- * connect MQTT, publish sensors/raw, sample RSSI, publish status, then
- * disconnect MQTT and WiFi. t_active_start_ms is the uptime recorded at wake
+ * connect MQTT, publish sensors/raw, sample RSSI, publish status, confirm
+ * that the broker received both (ADR-0010), then disconnect MQTT and WiFi.
+ * An unconfirmed delivery fails the Cycle like a failed publish. t_active_start_ms is the uptime recorded at wake
  * entry (FR-MA-07 step 1). Never retries: a failed WiFi or MQTT step skips
  * the publishing, and the function still returns with the radio torn down,
  * ready for Sleep. wake_reason is always "timer" in this slice, and

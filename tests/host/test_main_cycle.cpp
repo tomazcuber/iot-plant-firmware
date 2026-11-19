@@ -1,6 +1,7 @@
 /* Host tests for apps/main's Active phase (issue #22): the Cycle's call
  * sequence (FR-MA-07), discard-on-failure (DD-MA-02), null fields
- * (FR-MA-08a, DD-MA-11) and the Phase durations in `status` (FR-MA-16).
+ * (FR-MA-08a, DD-MA-11), the Phase durations in `status` (FR-MA-16) and the
+ * delivery confirmation before teardown (ADR-0010).
  * The payloads come from the real plant_json encoder. */
 #include <errno.h>
 #include <stdint.h>
@@ -35,13 +36,15 @@ static int failures;
 /* Fake clock and fake hardware (the seams are <plant/sensors.h> and
  * <plant/net.h>). Each fake advances the clock by its scripted duration and
  * appends a letter to `calls`: I sensors init, s sensors read, N net init,
- * W wifi connect, S sntp, M mqtt connect, P publish, R rssi, D mqtt
- * disconnect, X wifi disconnect. */
+ * W wifi connect, S sntp, M mqtt connect, P publish, R rssi, F mqtt flush,
+ * D mqtt disconnect, X wifi disconnect. */
 static int64_t now_ms;
 static char calls[64];
-static int wifi_ret, sntp_ret, mqtt_ret, publish_ret, rssi_ret;
+static int wifi_ret, sntp_ret, mqtt_ret, publish_ret, rssi_ret, flush_ret;
+/* 1-based index of the publish that fails with -ENOTCONN; 0 = none. */
+static int publish_fail_at, publish_count;
 static uint8_t sensors_valid;
-static int32_t wifi_timeout, sntp_timeout, mqtt_timeout;
+static int32_t wifi_timeout, sntp_timeout, mqtt_timeout, flush_timeout;
 static const char *last_ssid, *last_psk, *last_broker, *last_client_id;
 
 struct Published {
@@ -126,6 +129,9 @@ int plant_mqtt_connect(const char *broker_host, const char *client_id, int32_t t
 int plant_mqtt_publish(const char *topic, const char *payload, size_t len)
 {
 	log_call('P', 5);
+	if (++publish_count == publish_fail_at) {
+		return -ENOTCONN;
+	}
 	if (publish_ret == 0 && n_published < 4) {
 		Published &p = published[n_published++];
 
@@ -142,6 +148,13 @@ int plant_wifi_rssi(int16_t *rssi_dbm)
 		*rssi_dbm = -55;
 	}
 	return rssi_ret;
+}
+
+int plant_mqtt_flush(int32_t timeout_ms)
+{
+	log_call('F', 150);
+	flush_timeout = timeout_ms;
+	return flush_ret;
 }
 
 int plant_mqtt_disconnect(void)
@@ -166,7 +179,7 @@ int plant_mqtt_poll(int32_t timeout_ms)
 } /* extern "C" */
 
 static const plant::CycleConfig cfg = {
-	"lab-ap", "password", "10.0.0.2", "balcony-pot-1", 10000, 3000, 10000,
+	"lab-ap", "password", "10.0.0.2", "balcony-pot-1", 10000, 3000, 10000, 5000,
 };
 
 /* Wake at uptime 50 ms (the boot prologue precedes step 1). */
@@ -176,14 +189,16 @@ static void fresh_wake()
 {
 	now_ms = T_ACTIVE_START;
 	calls[0] = '\0';
-	wifi_ret = sntp_ret = mqtt_ret = publish_ret = rssi_ret = 0;
+	wifi_ret = sntp_ret = mqtt_ret = publish_ret = rssi_ret = flush_ret = 0;
 	sensors_valid = 0x7f;
+	publish_fail_at = publish_count = 0;
 	n_published = 0;
 	memset(published, 0, sizeof(published));
 }
 
 /* Happy path: sensors -> WiFi -> SNTP -> MQTT -> raw -> RSSI -> status ->
- * MQTT disconnect -> WiFi disconnect, with the configured credentials. */
+ * delivery confirmation -> MQTT disconnect -> WiFi disconnect, with the
+ * configured credentials and timeouts. */
 static void test_cycle_runs_the_wake_sequence_in_order()
 {
 	fresh_wake();
@@ -191,7 +206,7 @@ static void test_cycle_runs_the_wake_sequence_in_order()
 	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
 
 	CHECK(r.error == 0);
-	CHECK_STR(calls, "IsNWSMPRPDX");
+	CHECK_STR(calls, "IsNWSMPRPFDX");
 	CHECK_STR(last_ssid, "lab-ap");
 	CHECK_STR(last_psk, "password");
 	CHECK_STR(last_broker, "10.0.0.2");
@@ -199,14 +214,15 @@ static void test_cycle_runs_the_wake_sequence_in_order()
 	CHECK(wifi_timeout == 10000);
 	CHECK(sntp_timeout == 3000);
 	CHECK(mqtt_timeout == 10000);
+	CHECK(flush_timeout == 5000);
 }
 
 /* Both payloads go to plants/{device-name}/... (FR-MA-09) in main's schema
  * (FR-MA-10). Scripted clock: wake at 50, sensors done at 170 (t_sensor 120),
  * SNTP returns at 930 with epoch 1712000000000, raw is encoded at 1010 after
  * MQTT connect, and status at 1015 after the raw publish and the RSSI sample
- * (t_wifi 845, t_active 965). Both payloads carry the wall clock of the raw
- * publish. cycle_count and t_sleep_ms are null: no retained state yet. */
+ * (t_wifi 845, t_active 965). The delivery confirmation that follows is in
+ * no t_* term. Both payloads carry the wall clock of the raw publish. cycle_count and t_sleep_ms are null: no retained state yet. */
 static void test_cycle_publishes_raw_then_status_with_phase_durations()
 {
 	fresh_wake();
@@ -272,6 +288,34 @@ static void test_failed_raw_publish_skips_status_and_tears_down()
 	CHECK_STR(calls, "IsNWSMPDX");
 }
 
+/* ADR-0010: when the broker doesn't confirm delivery in time, the Cycle
+ * fails like a failed publish (DD-MA-02: no retry) and the link is still torn
+ * down. The published durations are unaffected. */
+static void test_unconfirmed_delivery_fails_the_cycle_and_tears_down()
+{
+	fresh_wake();
+	flush_ret = -ETIMEDOUT;
+
+	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+
+	CHECK(r.error == -ETIMEDOUT);
+	CHECK_STR(calls, "IsNWSMPRPFDX");
+	CHECK(n_published == 2);
+	CHECK(r.t_active_ms == 965);
+}
+
+/* A failed status publish skips the delivery confirmation. */
+static void test_failed_status_publish_skips_confirmation()
+{
+	fresh_wake();
+	publish_fail_at = 2; /* raw goes out, status fails */
+
+	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+
+	CHECK(r.error == -ENOTCONN);
+	CHECK_STR(calls, "IsNWSMPRPDX");
+}
+
 /* DD-MA-11: one SNTP attempt; on failure timestamp_ms is null in both payloads
  * and the Cycle carries on. */
 static void test_sntp_failure_publishes_null_timestamps()
@@ -282,7 +326,7 @@ static void test_sntp_failure_publishes_null_timestamps()
 	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
 
 	CHECK(r.error == 0);
-	CHECK_STR(calls, "IsNWSMPRPDX");
+	CHECK_STR(calls, "IsNWSMPRPFDX");
 	CHECK(n_published == 2);
 	CHECK(strstr(published[0].payload, "\"timestamp_ms\":null}") != nullptr);
 	CHECK(strstr(published[1].payload, "\"timestamp_ms\":null}") != nullptr);
@@ -327,6 +371,8 @@ int main()
 	test_wifi_failure_skips_publishing_and_tears_down();
 	test_mqtt_failure_skips_publishing_and_disconnects_wifi();
 	test_failed_raw_publish_skips_status_and_tears_down();
+	test_unconfirmed_delivery_fails_the_cycle_and_tears_down();
+	test_failed_status_publish_skips_confirmation();
 	test_sntp_failure_publishes_null_timestamps();
 	test_failed_sensors_publish_null_fields();
 	test_rssi_failure_publishes_null_rssi();
