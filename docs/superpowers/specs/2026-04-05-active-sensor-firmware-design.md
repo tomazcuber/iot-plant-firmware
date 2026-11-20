@@ -5,6 +5,8 @@
 **Date:** 2026-04-05  
 **Status:** Superseded (2026-10-15), not implemented
 
+> **Thesis scope (2026-11-12):** cut from the thesis; see [ADR-0009](../../adr/0009-thesis-scope-cut.md).
+
 > **Superseded.** With the INA219 bench, I_sensor and t_sensor are obtained from the current trace of the `main` firmware, using the phase markers described in the main firmware PRD. The sensor phase (about 120–180 ms, dominated by the BH1750FVI high-resolution measurement) is long enough to be resolved in the trace, and measuring it inside `main` captures the real sequence after waking from deep sleep. This PRD is kept to document the design decision; the requirements below are no longer in force.
 
 ---

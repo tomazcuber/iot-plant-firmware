@@ -3,7 +3,9 @@
 **Project:** IoT Plant Monitoring — Bachelor's Thesis  
 **Firmware:** `apps/main`  
 **Date:** 2026-04-05  
-**Status:** Approved (energy model and measurement sections revised 2026-10-15; sensors, data model and build integration revised 2026-10-30 for the [shared modules](2026-10-30-shared-modules-design.md))
+**Status:** Approved (energy model and measurement sections revised 2026-10-15; sensors, data model and build integration revised 2026-10-30 for the [shared modules](2026-10-30-shared-modules-design.md); FR-MA-16, FR-MA-18 and Measurement Procedure amended 2026-11-20 for the teardown marker)
+
+> **Thesis scope (2026-11-12):** the thesis builds a reduced `main` (no BLE, no Settings/NVS, no provisioning, compile-time configuration); see [ADR-0009](../../adr/0009-thesis-scope-cut.md) for what is cut and why. The cut requirements below stay as the product design.
 
 ---
 
@@ -53,8 +55,10 @@ Hardware is assembled on a protoboard. No custom PCB.
 | I2C SCL | GPIO5 | Shared bus |
 | Soil moisture ADC | GPIO2 | ADC1\_CH2 |
 | LM393 DO (deep sleep wake) | GPIO6 | LP domain; RTC GPIO interrupt wake source |
+| Phase marker bit 1 (FR-MA-18) | GPIO18 | Output to the Reader's GPIO6; HP domain, stops driving in deep sleep |
+| Phase marker bit 0 (FR-MA-18) | GPIO19 | Output to the Reader's GPIO7; HP domain, stops driving in deep sleep |
 
-All four signals are on LP-domain GPIOs (GPIO0–GPIO7), which is required for GPIO6 to function as a deep sleep wake source. GPIO4 and GPIO5 are also LP-domain capable but are used here as standard I2C pins via the GPIO matrix. GPIO2 is ADC1\_CH2 and free of I2C and wake assignments.
+The four sensor signals are on LP-domain GPIOs (GPIO0–GPIO7), which is required for GPIO6 to function as a deep sleep wake source. GPIO4 and GPIO5 are also LP-domain capable but are used here as standard I2C pins via the GPIO matrix. GPIO2 is ADC1\_CH2 and free of I2C and wake assignments.
 
 The I2C and ADC assignments are defined once in the `plant_sensors` shield, shared with comparison baseline A (see the [shared-modules spec](2026-10-30-shared-modules-design.md), SM-08 to SM-10). The upstream `esp32c6_devkitc` board routes I2C0 to GPIO6/GPIO7 by default; the shield moves it to GPIO4/GPIO5, which frees GPIO6. The GPIO6 wake source is defined only in `apps/main/app.overlay`.
 
@@ -359,6 +363,8 @@ The following durations shall be computed and published in the `status` topic ev
 - `t_ble_ms = t_active_end - t_ble_start` (0 when `ble_window_s` is 0)
 - `t_active_ms = t_active_end - t_active_start`
 
+> **Amended 2026-11-20 ([ADR-0009](../../adr/0009-thesis-scope-cut.md)).** In the thesis build there is no BLE phase, and the WiFi phase stops just before `status` is encoded, not after the teardown: a payload can only carry durations that end before it is encoded. So `t_wifi_ms` ends there, `t_ble_ms` is always 0, and `t_active_ms = t_sensor_ms + t_wifi_ms`. The rest of the `Active phase` (the `status` publish, the delivery confirmation of [ADR-0010](../../adr/0010-confirm-delivery-before-sleep.md), the MQTT and WiFi disconnect, and the sleep entry: retained-RAM write and wake-source arming, up to `sys_poweroff()`) is the **Teardown**. It is in no `t_*` field and is measured from the trace through the `11` phase marker (FR-MA-18).
+
 #### FR-MA-17: Cycle Counter
 A `device/cycle_count` persisted in Settings shall increment on every wake and be published in the `status` topic. This enables detection of missed MQTT publishes (gaps in sequence) and correlation of data with specific cycles in thesis analysis.
 
@@ -418,9 +424,13 @@ This procedure shall be documented in the thesis methodology chapter. Added 2026
 - Power source voltage: V = 5 V.
 - Reader: the second board samples the INA219 as fast as the I2C link allows (target 1 kHz or more, single 12-bit conversions, no hardware averaging) and streams `t_us, current_mA, phase` lines to a CSV file on the computer.
 
-### Phase markers (proposed FR-MA-18, not yet implemented)
+### Phase markers (FR-MA-18)
 
-Two free GPIOs of the board under test encode the current phase: `01` sensors, `10` Wi-Fi, `11` BLE, `00` otherwise. The firmware sets them at the same points where FR-MA-16 records its timestamps, and releases them before deep sleep. The pins shall avoid the strapping pins and the pins listed in Pin Assignment. The reader samples both pins with every current reading, with pull-downs so they read `00` during deep sleep.
+Amended 2026-11-20: a requirement, not a proposal, and `11` marks the Teardown instead of BLE ([ADR-0009](../../adr/0009-thesis-scope-cut.md)).
+
+Two GPIOs of the board under test, GPIO18 (bit 1) and GPIO19 (bit 0), encode the current phase: `01` sensors, `10` Wi-Fi, `11` Teardown, `00` otherwise. The firmware sets `01` at `t_active_start`, `10` at `t_wifi_start` and `11` where `t_wifi_ms` stops (FR-MA-16), and releases both pins to `00` as the last step before `sys_poweroff()`, after the retained-RAM write and the wake-source arming. A `Cycle` whose WiFi or MQTT step failed still marks its teardown. The pins avoid the strapping pins and the other pins in Pin Assignment. The reader samples both pins with every current reading (Reader GPIO6 = bit 1, GPIO7 = bit 0), with pull-downs so they read `00` during boot and deep sleep. Comparison baseline A drives no markers.
+
+If BLE returns, two bits no longer cover sensors, Wi-Fi, teardown and BLE, and the encoding needs a redesign.
 
 The phase-marker code shall be a C unit with a C header inside `apps/main/src/` (`phase_markers.{h,c}`), called from `main`'s C++. It has one user today; keeping it C-compatible means moving it into a shared module later is a file move, not a rewrite (shared-modules spec, Consumers).
 
@@ -429,10 +439,10 @@ The phase-marker code shall be a C unit with a C header inside `apps/main/src/` 
 1. Provision `main` with the `read_interval_s` and `ble_window_s` of the condition under test, then disconnect USB.
 2. Insert the INA219 in series in the 5 V line and start logging.
 3. Log at least 10 complete wake cycles per run; repeat three runs per condition.
-4. For each cycle, compute I_sensor, I_wifi and I_ble as the mean current over the samples with that phase code, and t_sensor, t_wifi and t_ble as the duration of each code. The durations shall agree with the `status` payload values within one sampling period plus GPIO latency.
+4. For each cycle, compute I_sensor, I_wifi and I_teardown as the mean current over the samples with that phase code (`01`, `10`, `11`), and t_sensor, t_wifi and t_teardown as the duration of each code. t_sensor and t_wifi shall agree with the `status` payload values within one sampling period plus GPIO latency; t_teardown exists only in the trace. (Amended 2026-11-20: no BLE phase in the thesis build, [ADR-0009](../../adr/0009-thesis-scope-cut.md).)
 5. Boot: the interval between the current rising out of sleep and the first `01` marker is **t_boot**, and its mean current is **I_boot**. `t_active_start` is taken at `main()` entry, so boot time appears in no published duration and is otherwise counted as sleep. Keep the term in E_cycle unless it proves negligible.
 6. Sleep: I_sleep from the `static-sleep` procedure; t_sleep from the `status` payload.
-7. Model validation: fit the currents with the runs at one `read_interval_s`, predict E_cycle at another, and compare with the energy measured directly from the trace at that interval.
+7. Model validation (required, [ADR-0009](../../adr/0009-thesis-scope-cut.md)): fit the currents with the runs at one `read_interval_s`, predict E_cycle at another, and compare with the energy measured directly from the trace at that interval. The thesis extrapolates beyond 60 s and 300 s (break-even interval with baseline A, battery life) only if this check passes.
 
 ---
 
