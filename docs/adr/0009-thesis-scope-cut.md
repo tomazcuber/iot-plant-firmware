@@ -44,4 +44,4 @@ The thesis text is due around 2026-11-26, and the `main` measurement campaign ha
 - The `main`, `active-sensor` and `active-ble` specs carry a status note pointing here. The `main` spec's FR-MA-16, FR-MA-18 and Measurement Procedure are amended inline for the marker codes and the teardown; the rest of its text is left as the product design.
 - The Teardown has no `status` field, because `status` is encoded before it starts. It is measured from the trace only, like `t_boot`.
 - If BLE comes back, the marker encoding needs a redesign: two bits no longer fit sensors, WiFi, teardown and BLE.
-- Work is tracked on GitHub: the reduced `main` (#22), retained state (#24), the soil wake (#26), and new issues for the markers and for the per-phase analysis with Step 7.
+- Work is tracked on GitHub: the reduced `main` (#22), retained state (#24), the soil wake (#26), the phase markers (#28) and the per-phase analysis with Step 7 (#29).
