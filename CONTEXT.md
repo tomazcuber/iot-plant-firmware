@@ -19,7 +19,7 @@ The awake portion of a `Cycle`, from wake to the next sleep-entry. It ends with 
 _Avoid_: active window (reserved for `BLE advertising window`), wake window.
 
 **Teardown**:
-The last part of an `Active phase`, after the `status` payload is encoded: the `status` publish, the delivery confirmation and the MQTT and Wi-Fi disconnect. Marked `11` by the `Phase marker`s. Its duration `t_teardown` exists only in the `Current trace`, because `status` is encoded before it starts. A `Cycle` whose Wi-Fi or MQTT step failed still has one.
+The last part of an `Active phase`, from the encoding of the `status` payload up to power-off: the `status` publish, the delivery confirmation, the MQTT and Wi-Fi disconnect, and the sleep entry (retained-memory write, wake-source arming). Marked `11` by the `Phase marker`s. Its duration `t_teardown` exists only in the `Current trace`, because `status` is encoded before it starts. A `Cycle` whose Wi-Fi or MQTT step failed still has one.
 _Avoid_: shutdown, cleanup, epilogue (the CPU-on bookkeeping around sleep entry in ADR-0001).
 
 **Sleep**:
@@ -127,7 +127,7 @@ _Avoid_: validation (unqualified), reader test.
 ## Flagged ambiguities
 
 **`Active phase` vs `Energy model` conservation.**
-The published `t_sensor` and `t_wifi` sum to `t_active`, but the `Active phase` is longer: it also holds the boot prologue (before the first `k_uptime_get()` in `main()`), the `Teardown`, and the sleep entry after it (retained-memory write and power-off). The `Phase marker`s recover the first two from the trace as `t_boot` and `t_teardown`. Only the short stretch between the end of `11` and the drop to `I_sleep` stays unmodelled; the thesis accepts it, as [ADR-0001](docs/adr/0001-active-phase-boundary.md) does for the original brackets.
+The published `t_sensor` and `t_wifi` sum to `t_active`, but the `Active phase` is longer: it also holds the boot prologue (before the first `k_uptime_get()` in `main()`) and the `Teardown`. The `Phase marker`s recover both from the trace as `t_boot` and `t_teardown`. Only the short stretch between the power-off call (where `11` ends) and the drop to `I_sleep` stays unmodelled; the thesis accepts it, as [ADR-0001](docs/adr/0001-active-phase-boundary.md) does for the original brackets.
 
 ## Example dialogue
 
