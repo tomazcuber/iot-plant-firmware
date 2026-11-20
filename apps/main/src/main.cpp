@@ -39,16 +39,11 @@ int main(void)
 
 	/* Step 2a: this Cycle's number and the Sleep that preceded it. */
 	main_retained &retained = *sleep_retained();
-	const plant::WakeState wake = plant::retained_on_wake(retained, sleep_ended());
+	const plant::WakeState wake = plant::retained_on_wake(retained, sleep_woke());
 
-	if (wake.t_sleep_valid) {
-		LOG_WRN("main: device %s, read interval %d s, cycle %u after %u ms Sleep",
-			CONFIG_APP_DEVICE_NAME, CONFIG_APP_READ_INTERVAL_S, wake.cycle_count,
-			wake.t_sleep_ms);
-	} else {
-		LOG_WRN("main: device %s, read interval %d s, cycle %u, first boot",
-			CONFIG_APP_DEVICE_NAME, CONFIG_APP_READ_INTERVAL_S, wake.cycle_count);
-	}
+	LOG_WRN("main: device %s, read interval %d s, cycle %u, %s", CONFIG_APP_DEVICE_NAME,
+		CONFIG_APP_READ_INTERVAL_S, wake.cycle_count,
+		wake.t_sleep_valid ? "woke from Sleep" : "first boot");
 
 	const plant::CycleResult r = plant::run_cycle(cycle_cfg, wake, t_active_start_ms);
 

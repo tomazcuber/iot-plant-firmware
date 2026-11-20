@@ -2,13 +2,13 @@
 
 namespace plant {
 
-WakeState retained_on_wake(main_retained &rs, bool deep_sleep_wake)
+WakeState retained_on_wake(main_retained &rs, bool woke_from_sleep)
 {
 	WakeState w = {0, false, 0};
 
-	/* Only a deep-sleep wake vouches for the magic: a reset or reflash can
-	 * leave a complete record behind. */
-	if (deep_sleep_wake && rs.magic == RETAINED_MAGIC) {
+	/* Only a wake from Sleep vouches for the magic: a reset or reflash
+	 * can leave a complete record behind. */
+	if (woke_from_sleep && rs.magic == RETAINED_MAGIC) {
 		/* Only the timer wakes the device so far: the armed length is
 		 * the Sleep that was taken (FR-MA-06). A GPIO wake will use
 		 * sleep_start_rtc_ms instead. */

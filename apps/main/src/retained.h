@@ -1,5 +1,5 @@
 /* State that survives Sleep (FR-MA-06 retained struct, FR-MA-17 cycle_count;
- * scope cut: ADR-0009). Each Cycle is a fresh boot, so this is the only
+ * scope cut: ADR-0009, #23). Each Cycle is a fresh boot, so this is the only
  * memory one Cycle leaves the next.
  *
  * The struct lives in LP SRAM, which stays powered in deep sleep; the
@@ -39,13 +39,13 @@ struct WakeState {
 };
 
 /* FR-MA-07 step 2a. Read the record the previous Cycle left, if any, and
- * claim this Cycle's number. The record is valid only when this boot is the
- * end of a Sleep (deep_sleep_wake) *and* the magic is intact: a reset or a
+ * claim this Cycle's number. The record is valid only when this boot is a
+ * wake from Sleep (woke_from_sleep) *and* the magic is intact: a reset or a
  * reflash can leave LP SRAM, magic included, untouched. On a valid timer wake
  * cycle_count is the previous one plus 1 and t_sleep_ms is the Sleep length
  * that was armed. Otherwise (first boot, reset, reflash, power loss) the
  * count restarts at 0, as baseline A's first slot, and t_sleep_ms is null. */
-WakeState retained_on_wake(main_retained &rs, bool deep_sleep_wake);
+WakeState retained_on_wake(main_retained &rs, bool woke_from_sleep);
 
 /* FR-MA-07 step 19, just before Sleep: record the RTC time and the Sleep
  * length about to be armed, and mark the record valid. */

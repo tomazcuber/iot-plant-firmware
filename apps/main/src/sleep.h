@@ -16,9 +16,9 @@
 extern "C" {
 #endif
 
-/* true when this boot is the end of a Sleep, false on any other boot
+/* true when this boot is a wake from Sleep, false on any other boot
  * (power-on, reset, reflash). Only the RTC timer ends a Sleep so far. */
-bool sleep_ended(void);
+bool sleep_woke(void);
 
 /* The struct that survives Sleep (retained.h), in LP SRAM. Its content is
  * whatever the previous boot left, or garbage after power-on. */

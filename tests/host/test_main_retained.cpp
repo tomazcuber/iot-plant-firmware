@@ -1,5 +1,5 @@
 /* Host tests for apps/main's retained state (issue #24): the magic check of
- * FR-MA-06, cycle_count (FR-MA-17, kept next to magic: ADR-0009) and
+ * FR-MA-06, cycle_count (FR-MA-17, kept next to magic: ADR-0009, #23) and
  * t_sleep_ms on a timer wake. Each test drives the struct through the same
  * wake/sleep calls the firmware makes, Cycle by Cycle. */
 #include <stdint.h>
@@ -95,9 +95,9 @@ static void test_reflash_with_intact_record_restarts_the_count()
 	CHECK(!w.t_sleep_valid);
 }
 
-/* A deep-sleep wake whose record was never completed (the magic is
+/* A wake from Sleep whose record was never completed (the magic is
  * missing) is treated as a first boot too. */
-static void test_deep_sleep_wake_without_magic_restarts_the_count()
+static void test_wake_from_sleep_without_magic_restarts_the_count()
 {
 	main_retained rs = power_on_garbage();
 
@@ -131,7 +131,7 @@ int main()
 	test_timer_wakes_count_up_and_report_the_armed_sleep();
 	test_t_sleep_is_the_previously_armed_length();
 	test_reflash_with_intact_record_restarts_the_count();
-	test_deep_sleep_wake_without_magic_restarts_the_count();
+	test_wake_from_sleep_without_magic_restarts_the_count();
 	test_count_runs_on_after_a_restart();
 
 	if (failures) {

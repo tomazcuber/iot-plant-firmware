@@ -7,7 +7,8 @@ CFLAGS  += -I../../lib/plant_sensors/include
 CXXFLAGS += -std=c++17 -Wall -Wextra -Werror -O0 -g
 CXXFLAGS += -I../../include -I../../lib/plant_json/include
 
-TESTS := test_json test_net_util test_soil_calib test_active_wifi test_main_cycle \n	 test_main_retained
+TESTS := test_json test_net_util test_soil_calib test_active_wifi test_main_cycle \
+	 test_main_retained
 
 .PHONY: all clean $(TESTS)
 all: $(TESTS)
