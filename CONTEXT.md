@@ -23,7 +23,7 @@ The last part of an `Active phase`, after the `status` payload is encoded: the `
 _Avoid_: shutdown, cleanup, epilogue (the CPU-on bookkeeping around sleep entry in ADR-0001).
 
 **Sleep**:
-The dormant portion of a `Cycle` — the device is in `PM_STATE_SOFT_OFF`, the radios are off, and only the LP domain (RTC + LP SRAM) is powered. Its measured duration is `t_sleep`.
+The dormant portion of a `Cycle` — the device is powered off with `sys_poweroff()` (deep sleep), the radios are off, and only the LP domain (RTC + LP SRAM) is powered. Its measured duration is `t_sleep`.
 _Avoid_: deep sleep (use only when contrasting with hypothetical light sleep), suspend, idle.
 
 **Mode**:
@@ -49,7 +49,7 @@ The BLE-on portion of a `Provisioning attempt` (5 min by default), during which 
 _Avoid_: advertise phase, provisioning advertise window.
 
 **Backoff sleep**:
-The dormant portion of a `Provisioning attempt` (30 min by default), between the end of one `Provisioning window` and the start of the next. The device is in `PM_STATE_SOFT_OFF` drawing `I_sleep`. Distinct from `Sleep`, which is `Cycle`-scoped. Not built in the thesis firmware ([ADR-0009](docs/adr/0009-thesis-scope-cut.md)).
+The dormant portion of a `Provisioning attempt` (30 min by default), between the end of one `Provisioning window` and the start of the next. The device is in deep sleep drawing `I_sleep`. Distinct from `Sleep`, which is `Cycle`-scoped. Not built in the thesis firmware ([ADR-0009](docs/adr/0009-thesis-scope-cut.md)).
 _Avoid_: provisioning sleep, retry sleep, idle sleep.
 
 **BLE advertising window**:
