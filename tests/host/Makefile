@@ -7,7 +7,7 @@ CFLAGS  += -I../../lib/plant_sensors/include
 CXXFLAGS += -std=c++17 -Wall -Wextra -Werror -O0 -g
 CXXFLAGS += -I../../include -I../../lib/plant_json/include
 
-TESTS := test_json test_net_util test_soil_calib test_active_wifi test_main_cycle
+TESTS := test_json test_net_util test_soil_calib test_active_wifi test_main_cycle \n	 test_main_retained
 
 .PHONY: all clean $(TESTS)
 all: $(TESTS)
@@ -36,6 +36,11 @@ test_main_cycle: test_main_cycle.cpp ../../apps/main/src/cycle.cpp ../../lib/pla
 	$(CC) $(CFLAGS) -c -o json_main_cycle.o ../../lib/plant_json/json.c
 	$(CXX) $(CXXFLAGS) -o $@ test_main_cycle.cpp ../../apps/main/src/cycle.cpp json_main_cycle.o
 	rm -f json_main_cycle.o
+	./$@
+
+test_main_retained: CXXFLAGS += -I../../apps/main/src
+test_main_retained: test_main_retained.cpp ../../apps/main/src/retained.cpp
+	$(CXX) $(CXXFLAGS) -o $@ $^
 	./$@
 
 clean:

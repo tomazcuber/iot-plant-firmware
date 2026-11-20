@@ -1,7 +1,8 @@
 /* apps/main, reduced for the thesis comparison (issue #22): a timer-only
  * Cycle. Each boot is one Cycle: run the Active phase, then Sleep for
  * CONFIG_APP_READ_INTERVAL_S. There is no application loop; the RTC timer
- * wake is a fresh boot. */
+ * wake is a fresh boot, and the retained struct (retained.h) is all that one
+ * Cycle hands the next (issue #24). */
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/logging/log_ctrl.h>
@@ -36,11 +37,20 @@ int main(void)
 	/* FR-MA-07 step 1: the first timestamp of the Active phase. */
 	const int64_t t_active_start_ms = k_uptime_get();
 
-	LOG_WRN("main: device %s, read interval %d s, %s", CONFIG_APP_DEVICE_NAME,
-		CONFIG_APP_READ_INTERVAL_S,
-		sleep_woke_from_timer() ? "timer wake" : "cold boot");
+	/* Step 2a: this Cycle's number and the Sleep that preceded it. */
+	main_retained &retained = *sleep_retained();
+	const plant::WakeState wake = plant::retained_on_wake(retained, sleep_ended());
 
-	const plant::CycleResult r = plant::run_cycle(cycle_cfg, t_active_start_ms);
+	if (wake.t_sleep_valid) {
+		LOG_WRN("main: device %s, read interval %d s, cycle %u after %u ms Sleep",
+			CONFIG_APP_DEVICE_NAME, CONFIG_APP_READ_INTERVAL_S, wake.cycle_count,
+			wake.t_sleep_ms);
+	} else {
+		LOG_WRN("main: device %s, read interval %d s, cycle %u, first boot",
+			CONFIG_APP_DEVICE_NAME, CONFIG_APP_READ_INTERVAL_S, wake.cycle_count);
+	}
+
+	const plant::CycleResult r = plant::run_cycle(cycle_cfg, wake, t_active_start_ms);
 
 	if (r.error != 0) {
 		LOG_WRN("cycle not published: %d", r.error);
@@ -51,7 +61,13 @@ int main(void)
 		r.t_sensor_ms, r.t_wifi_ms, r.t_active_ms,
 		(uint32_t)(k_uptime_get() - t_active_start_ms));
 
+	/* Step 19: the record the next Cycle reads, with the Sleep length
+	 * that is about to be armed. */
+	const uint32_t sleep_s = CONFIG_APP_READ_INTERVAL_S;
+
+	plant::retained_on_sleep(retained, sleep_rtc_ms(), sleep_s * 1000U);
+
 	/* Deferred logging: print everything before the power goes. */
 	LOG_PANIC();
-	sleep_for(CONFIG_APP_READ_INTERVAL_S);
+	sleep_for(sleep_s);
 }

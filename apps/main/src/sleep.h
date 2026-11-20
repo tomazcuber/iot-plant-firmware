@@ -1,7 +1,7 @@
-/* Sleep entry and wake cause: the only SoC-specific code of apps/main.
- * Sleep is the SoC's deep sleep (HP domain off), entered with sys_poweroff(),
- * not the light sleep CONFIG_PM picks when idle. The Espressif implementation
- * is sleep_esp32.c. */
+/* Sleep entry, wake cause and retained memory: the only SoC-specific code of
+ * apps/main. Sleep is the SoC's deep sleep (HP domain off), entered with
+ * sys_poweroff(), not the light sleep CONFIG_PM picks when idle. The
+ * Espressif implementation is sleep_esp32.c. */
 #ifndef MAIN_SLEEP_H
 #define MAIN_SLEEP_H
 
@@ -10,14 +10,22 @@
 
 #include <zephyr/toolchain.h>
 
+#include "retained.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* true when this boot is the end of a Sleep (RTC timer wake), false on a cold
- * boot (power-on, reset, reflash). Logged only: both count as a "timer" wake
- * until retained state exists. */
-bool sleep_woke_from_timer(void);
+/* true when this boot is the end of a Sleep, false on any other boot
+ * (power-on, reset, reflash). Only the RTC timer ends a Sleep so far. */
+bool sleep_ended(void);
+
+/* The struct that survives Sleep (retained.h), in LP SRAM. Its content is
+ * whatever the previous boot left, or garbage after power-on. */
+struct main_retained *sleep_retained(void);
+
+/* RTC time in ms. Keeps counting through Sleep; restarts on power-on. */
+int64_t sleep_rtc_ms(void);
 
 /* Arm the RTC timer to wake after `seconds` and enter Sleep. Never returns:
  * the wake is a fresh boot. */

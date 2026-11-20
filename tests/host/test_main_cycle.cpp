@@ -185,6 +185,11 @@ static const plant::CycleConfig cfg = {
 /* Wake at uptime 50 ms (the boot prologue precedes step 1). */
 static const int64_t T_ACTIVE_START = 50;
 
+/* The retained state of the first boot, and of the 8th Cycle woken by the
+ * timer after a 60 s Sleep (retained.h). */
+static const plant::WakeState first_wake = {0, false, 0};
+static const plant::WakeState timer_wake = {7, true, 60000};
+
 static void fresh_wake()
 {
 	now_ms = T_ACTIVE_START;
@@ -203,7 +208,7 @@ static void test_cycle_runs_the_wake_sequence_in_order()
 {
 	fresh_wake();
 
-	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == 0);
 	CHECK_STR(calls, "IsNWSMPRPFDX");
@@ -222,12 +227,13 @@ static void test_cycle_runs_the_wake_sequence_in_order()
  * SNTP returns at 930 with epoch 1712000000000, raw is encoded at 1010 after
  * MQTT connect, and status at 1015 after the raw publish and the RSSI sample
  * (t_wifi 845, t_active 965). The delivery confirmation that follows is in
- * no t_* term. Both payloads carry the wall clock of the raw publish. cycle_count and t_sleep_ms are null: no retained state yet. */
+ * no t_* term. Both payloads carry the wall clock of the raw publish. On the
+ * first boot t_sleep_ms is null and cycle_count is 0 (FR-MA-06). */
 static void test_cycle_publishes_raw_then_status_with_phase_durations()
 {
 	fresh_wake();
 
-	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(n_published == 2);
 	CHECK_STR(published[0].topic, "plants/balcony-pot-1/sensors/raw");
@@ -240,11 +246,28 @@ static void test_cycle_publishes_raw_then_status_with_phase_durations()
 	CHECK_STR(published[1].payload,
 		  "{\"wake_reason\":\"timer\",\"t_active_ms\":965,\"t_sensor_ms\":120,"
 		  "\"t_wifi_ms\":845,\"t_ble_ms\":0,\"t_sleep_ms\":null,"
-		  "\"wifi_rssi_dbm\":-55,\"cycle_count\":null,"
+		  "\"wifi_rssi_dbm\":-55,\"cycle_count\":0,"
 		  "\"timestamp_ms\":1712000000080}");
 	CHECK(r.t_sensor_ms == 120);
 	CHECK(r.t_wifi_ms == 845);
 	CHECK(r.t_active_ms == 965);
+}
+
+/* On a timer wake with a valid retained record, status carries the Cycle's
+ * number and the Sleep that preceded it (FR-MA-06, FR-MA-17). */
+static void test_timer_wake_publishes_cycle_count_and_t_sleep()
+{
+	fresh_wake();
+
+	plant::CycleResult r = plant::run_cycle(cfg, timer_wake, T_ACTIVE_START);
+
+	CHECK(r.error == 0);
+	CHECK(n_published == 2);
+	CHECK_STR(published[1].payload,
+		  "{\"wake_reason\":\"timer\",\"t_active_ms\":965,\"t_sensor_ms\":120,"
+		  "\"t_wifi_ms\":845,\"t_ble_ms\":0,\"t_sleep_ms\":60000,"
+		  "\"wifi_rssi_dbm\":-55,\"cycle_count\":7,"
+		  "\"timestamp_ms\":1712000000080}");
 }
 
 /* DD-MA-02: a failed WiFi connect discards the Cycle's data. No SNTP, MQTT or
@@ -254,7 +277,7 @@ static void test_wifi_failure_skips_publishing_and_tears_down()
 	fresh_wake();
 	wifi_ret = -ETIMEDOUT;
 
-	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == -ETIMEDOUT);
 	CHECK_STR(calls, "IsNWX");
@@ -268,7 +291,7 @@ static void test_mqtt_failure_skips_publishing_and_disconnects_wifi()
 	fresh_wake();
 	mqtt_ret = -ECONNREFUSED;
 
-	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == -ECONNREFUSED);
 	CHECK_STR(calls, "IsNWSMX");
@@ -282,7 +305,7 @@ static void test_failed_raw_publish_skips_status_and_tears_down()
 	fresh_wake();
 	publish_ret = -ENOTCONN;
 
-	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == -ENOTCONN);
 	CHECK_STR(calls, "IsNWSMPDX");
@@ -296,7 +319,7 @@ static void test_unconfirmed_delivery_fails_the_cycle_and_tears_down()
 	fresh_wake();
 	flush_ret = -ETIMEDOUT;
 
-	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == -ETIMEDOUT);
 	CHECK_STR(calls, "IsNWSMPRPFDX");
@@ -310,7 +333,7 @@ static void test_failed_status_publish_skips_confirmation()
 	fresh_wake();
 	publish_fail_at = 2; /* raw goes out, status fails */
 
-	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == -ENOTCONN);
 	CHECK_STR(calls, "IsNWSMPRPDX");
@@ -323,7 +346,7 @@ static void test_sntp_failure_publishes_null_timestamps()
 	fresh_wake();
 	sntp_ret = -ETIMEDOUT;
 
-	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == 0);
 	CHECK_STR(calls, "IsNWSMPRPFDX");
@@ -340,7 +363,7 @@ static void test_failed_sensors_publish_null_fields()
 	sensors_valid = PLANT_VALID_BMP280_TEMPERATURE_C | PLANT_VALID_PRESSURE_HPA |
 			PLANT_VALID_LUX;
 
-	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == 0);
 	CHECK(n_published == 2);
@@ -357,7 +380,7 @@ static void test_rssi_failure_publishes_null_rssi()
 	fresh_wake();
 	rssi_ret = -EIO;
 
-	plant::CycleResult r = plant::run_cycle(cfg, T_ACTIVE_START);
+	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == 0);
 	CHECK(n_published == 2);
@@ -368,6 +391,7 @@ int main()
 {
 	test_cycle_runs_the_wake_sequence_in_order();
 	test_cycle_publishes_raw_then_status_with_phase_durations();
+	test_timer_wake_publishes_cycle_count_and_t_sleep();
 	test_wifi_failure_skips_publishing_and_tears_down();
 	test_mqtt_failure_skips_publishing_and_disconnects_wifi();
 	test_failed_raw_publish_skips_status_and_tears_down();
