@@ -3,7 +3,9 @@
 **Project:** IoT Plant Monitoring — Bachelor's Thesis  
 **Firmware:** `apps/active-ble`  
 **Date:** 2026-04-05  
-**Status:** Approved (role and measurement procedure revised 2026-10-15)
+**Status:** Cut from the thesis (2026-11-12, [ADR-0009](../../adr/0009-thesis-scope-cut.md)), not implemented. Role and measurement procedure revised 2026-10-15.
+
+> **Thesis scope (2026-11-12):** cut from the thesis together with BLE in `main`, so there is no `I_ble` to cross-check; see [ADR-0009](../../adr/0009-thesis-scope-cut.md).
 
 ---
 

@@ -2,6 +2,8 @@
 status: accepted
 ---
 
+> **Not built in the thesis firmware** ([ADR-0009](0009-thesis-scope-cut.md)): the thesis `main` has no re-provisioning button. The decision stands for the product design.
+
 # Re-provisioning hold is detected via GPIO9 interrupt + software timer, with a deferred reboot
 
 The 3-second BOOT-button hold (FR-MA-02) is detected by registering a falling-edge interrupt on GPIO9 at the start of every `Active phase` and starting a 3-second `k_timer` from within the ISR. A rising edge before the timer expires cancels it (button released). On timer expiry, the firmware sets a `re_provision_requested` flag; wake-cycle steps check it at safe abort points and defer the actual `settings_delete` + reboot until *after* the current cycle's MQTT publish completes. The press itself can begin before or during the `Active phase` — the firmware only cares that 3 s of continuous hold elapses while the device is awake.

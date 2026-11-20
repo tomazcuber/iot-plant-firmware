@@ -21,10 +21,10 @@ The reader is an **instrument, not a measured firmware**. It is never a `Device`
 | Procedure | Reader configuration | Source |
 |---|---|---|
 | ADR-0006 DTIM gate (baseline A idle, `MIN_MODEM` vs `NONE`) | Trace | this spec, DTIM gate |
-| `main` current trace (`I_boot`, `I_sensor`, `I_wifi`, `I_ble`, phase durations) | Trace + phase markers | main firmware spec, Steps 1–7 |
+| `main` current trace (`I_boot`, `I_sensor`, `I_wifi`, `I_teardown`, phase durations; no `I_ble` since [ADR-0009](../../adr/0009-thesis-scope-cut.md)) | Trace + phase markers | main firmware spec, Steps 1–7 |
 | Baseline A trace | Trace | active-wifi spec, Bench step 2 |
 | `static-sleep` 60 s cross-check | Trace | static-sleep spec, step 5 |
-| `active-ble` steady state | Averaged | active-ble spec, step 2 |
+| `active-ble` steady state (cut, [ADR-0009](../../adr/0009-thesis-scope-cut.md)) | Averaged | active-ble spec, step 2 |
 
 ---
 

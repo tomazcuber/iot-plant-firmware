@@ -3,7 +3,7 @@
 **Project:** IoT Plant Monitoring — Bachelor's Thesis  
 **Firmware:** `apps/active-wifi`  
 **Date:** 2026-04-05  
-**Status:** Revised 2026-10-30: requirements rewritten for comparison baseline A on the [shared modules](2026-10-30-shared-modules-design.md). Not implemented.
+**Status:** Revised 2026-10-30: requirements rewritten for comparison baseline A on the [shared modules](2026-10-30-shared-modules-design.md). Implemented 2026-11-17 (#19, #20).
 
 > **History.** Until 2026-10-15 this firmware measured I_wifi with a multimeter, using a tight connect–publish–disconnect loop. With the INA219 bench, I_wifi and t_wifi come from the current trace of the `main` firmware itself, which also removes the warm-versus-cold reconnect approximation of the former DD-AW-03. This firmware was then repurposed as **comparison baseline A**. On 2026-10-30 its requirements were rewritten to match, on top of the shared modules.
 

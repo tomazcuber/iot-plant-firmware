@@ -20,7 +20,7 @@ After publishing `status`, `main` now calls `plant_mqtt_flush()`: it sends a PIN
 
 ## Consequences
 
-- The confirmation round trip comes after `status` is encoded, so it is in no `t_*` term (as the rest of the teardown, see `CycleResult` and ADR-0001). It appears in the logged "ms to sleep" and in the INA219 trace, which is where the reduced energy model measures energy. It is a cost of the deep-sleep architecture: a device that powers its radio off must confirm delivery first; one that stays connected doesn't.
+- The confirmation round trip comes after `status` is encoded, so it is in no `t_*` term (as the rest of the teardown, see `CycleResult` and ADR-0001). It appears in the logged "ms to sleep" and in the INA219 trace, which is where the reduced energy model measures energy. It is a cost of the deep-sleep architecture: a device that powers its radio off must confirm delivery first; one that stays connected doesn't. *Amended 2026-11-20:* the round trip is inside the Teardown, which the phase markers mark `11` ([ADR-0009](0009-thesis-scope-cut.md)), so it is measured as `t_teardown` and `I_teardown`.
 - DD-MA-02 still holds: no per-message acknowledgement and no retry. The cycle now has one round trip for all its publishes.
 - The DISCONNECT and the TCP close can still be lost in the teardown, so the broker may keep logging `session taken over`. That is cosmetic: sessions are clean and the data already arrived.
 - The measurement campaign records the delivery rate of both firmwares (rows in the logger DB over cycles in the trace). With the barrier it should be close to 100 % in both, which is the evidence that they deliver the same service.
