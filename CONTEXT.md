@@ -11,53 +11,57 @@ A single ESP32-C6 board running one of the firmwares in `apps/`. The unit of dep
 _Avoid_: node, monitor, plant monitor (the BLE advertised name `PlantMonitor-XXXX` and the MQTT-facing `device_name` are external identifiers, not aliases for the term).
 
 **Cycle**:
-One full iteration of the device's operational loop: `Sleep` → wake → `Active phase` → re-enter `Sleep`. Counted by the persistent `device/cycle_count` Settings key.
+One full iteration of the device's operational loop: `Sleep` → wake → `Active phase` → re-enter `Sleep`. Counted by `cycle_count`, which survives `Sleep` but restarts after a power loss or a reflash.
 _Avoid_: wake cycle, sleep/wake cycle.
 
 **Active phase**:
-The awake portion of a `Cycle`, from wake to the next sleep-entry. Its measured duration is `t_active`.
+The awake portion of a `Cycle`, from wake to the next sleep-entry. It ends with the `Teardown`. Its published duration `t_active` covers the sensor and Wi-Fi phases only (see `Phase duration`).
 _Avoid_: active window (reserved for `BLE advertising window`), wake window.
+
+**Teardown**:
+The last part of an `Active phase`, after the `status` payload is encoded: the `status` publish, the delivery confirmation and the MQTT and Wi-Fi disconnect. Marked `11` by the `Phase marker`s. Its duration `t_teardown` exists only in the `Current trace`, because `status` is encoded before it starts. A `Cycle` whose Wi-Fi or MQTT step failed still has one.
+_Avoid_: shutdown, cleanup, epilogue (the CPU-on bookkeeping around sleep entry in ADR-0001).
 
 **Sleep**:
 The dormant portion of a `Cycle` — the device is in `PM_STATE_SOFT_OFF`, the radios are off, and only the LP domain (RTC + LP SRAM) is powered. Its measured duration is `t_sleep`.
 _Avoid_: deep sleep (use only when contrasting with hypothetical light sleep), suspend, idle.
 
 **Mode**:
-The device's top-level state. Two values: `Provisioning mode` and `Operational mode`. The `Cycle` vocabulary is scoped to `Operational mode` only; `Provisioning mode` is instead organised into `Provisioning attempt`s.
+The device's top-level state. Two values: `Provisioning mode` and `Operational mode`. The `Cycle` vocabulary is scoped to `Operational mode` only; `Provisioning mode` is instead organised into `Provisioning attempt`s. The thesis firmware has no `Provisioning mode`: it is configured at build time and runs `Cycle`s from boot ([ADR-0009](docs/adr/0009-thesis-scope-cut.md)).
 
 **Provisioning mode**:
-The mode the device is in when it has no usable WiFi credentials in `Settings`. BLE advertising is on, WiFi and MQTT are off, and the device is waiting for a client to write credentials over the `Provisioning service`.
+The mode the device is in when it has no usable WiFi credentials in `Settings`. BLE advertising is on, WiFi and MQTT are off, and the device is waiting for a client to write credentials over the `Provisioning service`. Not built in the thesis firmware ([ADR-0009](docs/adr/0009-thesis-scope-cut.md)).
 _Avoid_: PROVISIONING (all caps), provisioning state.
 
 **Operational mode**:
-The mode the device is in once credentials are persisted. Runs the sleep/wake `Cycle` indefinitely.
+The mode the device is in once credentials are persisted. Runs the sleep/wake `Cycle` indefinitely. The thesis firmware is always in it.
 _Avoid_: OPERATIONAL (all caps), normal operation, run mode.
 
 **Provisioning**:
-The process of receiving WiFi credentials and other Settings over BLE and persisting them to `Settings`. Happens inside `Provisioning mode` and ends with an atomic `commit` write and a reboot into `Operational mode`. Re-provisioning is the same process, triggered by holding the BOOT button for 3 s during the `Active phase` of a `Cycle`.
+The process of receiving WiFi credentials and other Settings over BLE and persisting them to `Settings`. Happens inside `Provisioning mode` and ends with an atomic `commit` write and a reboot into `Operational mode`. Re-provisioning is the same process, triggered by holding the BOOT button for 3 s during the `Active phase` of a `Cycle`. Not built in the thesis firmware ([ADR-0009](docs/adr/0009-thesis-scope-cut.md)).
 
 **Provisioning attempt**:
-One full advertise-and-backoff iteration in `Provisioning mode`: a `Provisioning window` followed by a `Backoff sleep`. Ends when a client successfully writes `commit` (the device then reboots into `Operational mode`); otherwise the next attempt begins automatically. The `Cycle` vocabulary does not apply.
+One full advertise-and-backoff iteration in `Provisioning mode`: a `Provisioning window` followed by a `Backoff sleep`. Ends when a client successfully writes `commit` (the device then reboots into `Operational mode`); otherwise the next attempt begins automatically. The `Cycle` vocabulary does not apply. Not built in the thesis firmware ([ADR-0009](docs/adr/0009-thesis-scope-cut.md)).
 _Avoid_: provisioning cycle, provisioning round, provisioning loop.
 
 **Provisioning window**:
-The BLE-on portion of a `Provisioning attempt` (5 min by default), during which the device advertises as `PlantMonitor-XXXX` and accepts writes to the `Provisioning service`. Distinct from the `BLE advertising window`, which is `Operational mode`-scoped.
+The BLE-on portion of a `Provisioning attempt` (5 min by default), during which the device advertises as `PlantMonitor-XXXX` and accepts writes to the `Provisioning service`. Distinct from the `BLE advertising window`, which is `Operational mode`-scoped. Not built in the thesis firmware ([ADR-0009](docs/adr/0009-thesis-scope-cut.md)).
 _Avoid_: advertise phase, provisioning advertise window.
 
 **Backoff sleep**:
-The dormant portion of a `Provisioning attempt` (30 min by default), between the end of one `Provisioning window` and the start of the next. The device is in `PM_STATE_SOFT_OFF` drawing `I_sleep`. Distinct from `Sleep`, which is `Cycle`-scoped.
+The dormant portion of a `Provisioning attempt` (30 min by default), between the end of one `Provisioning window` and the start of the next. The device is in `PM_STATE_SOFT_OFF` drawing `I_sleep`. Distinct from `Sleep`, which is `Cycle`-scoped. Not built in the thesis firmware ([ADR-0009](docs/adr/0009-thesis-scope-cut.md)).
 _Avoid_: provisioning sleep, retry sleep, idle sleep.
 
 **BLE advertising window**:
-The bounded BLE-on portion of an `Active phase` during which the device advertises the streaming service and accepts a single notification request. Its duration is `ble_window_s` (a `Settings` field); when `ble_window_s` is 0 the window is skipped entirely. Distinct from the `Provisioning window`, which is `Provisioning mode`-scoped.
+The bounded BLE-on portion of an `Active phase` during which the device advertises the streaming service and accepts a single notification request. Its duration is `ble_window_s` (a `Settings` field); when `ble_window_s` is 0 the window is skipped entirely. Distinct from the `Provisioning window`, which is `Provisioning mode`-scoped. Not built in the thesis firmware, which runs the `ble_window_s = 0` case ([ADR-0009](docs/adr/0009-thesis-scope-cut.md)).
 _Avoid_: BLE window, streaming window, active window.
 
 **Wake reason**:
-What caused the device to leave `Sleep` and begin an `Active phase`. Recorded per cycle and published as the `wake_reason` field of the `status` MQTT payload. Two values: `"timer"` (RTC timer fired after `read_interval_s`) and `"soil_moisture_alert"` (LM393 comparator on GPIO6 asserted — soil-moisture threshold crossing). The thesis's central comparison is the energy profile of `"timer"` cycles vs `"soil_moisture_alert"` cycles. The wire string names the *cause*, not the mechanism, so future event sources (e.g. a light-threshold alert) can slot in without retroactively breaking the dataset — see [ADR-0002](docs/adr/0002-wake-reason-wire-string.md).
+What caused the device to leave `Sleep` and begin an `Active phase`. Recorded per cycle and published as the `wake_reason` field of the `status` MQTT payload. Two values: `"timer"` (RTC timer fired after `read_interval_s`) and `"soil_moisture_alert"` (LM393 comparator on GPIO6 asserted — soil-moisture threshold crossing). The thesis's core comparison (`apps/main` vs comparison baseline A) uses `"timer"` cycles; `"soil_moisture_alert"` cycles are reported descriptively next to them. The wire string names the *cause*, not the mechanism, so future event sources (e.g. a light-threshold alert) can slot in without retroactively breaking the dataset — see [ADR-0002](docs/adr/0002-wake-reason-wire-string.md).
 _Avoid_: wake source, wake type, wake event, `"gpio"` (describes the mechanism, not the cause).
 
 **Settings**:
-The device's persistent key-value store, accessed via Zephyr's Settings subsystem and backed by NVS. Holds both user-set configuration (`wifi/ssid`, `wifi/pass`, `device/name`, `device/read_interval_s`, `device/ble_window_s`, `mqtt/broker`) and device-set persistent state (`device/cycle_count`). Both kinds are read via `settings_load` at boot and written via `settings_save_one`. A `commit` write during `Provisioning` atomically persists all fields and reboots into `Operational mode`.
+The device's persistent key-value store, accessed via Zephyr's Settings subsystem and backed by NVS. Holds the user-set configuration (`wifi/ssid`, `wifi/pass`, `device/name`, `device/read_interval_s`, `device/ble_window_s`, `mqtt/broker`), read via `settings_load` at boot. A `commit` write during `Provisioning` atomically persists all fields and reboots into `Operational mode`. Not built in the thesis firmware, which takes the same values from its build configuration and keeps `cycle_count` in retained memory instead ([ADR-0009](docs/adr/0009-thesis-scope-cut.md)).
 _Avoid_: config, configuration, preferences, NVS (the backing store), settings store, settings entry.
 
 **Sensor reading**:
@@ -67,11 +71,11 @@ _Avoid_: sample, observation, sensor data, raw payload, reading (unqualified).
 ### Energy model & measurement
 
 **Energy model**:
-The equation `E_cycle = (I_sleep × t_sleep + I_boot × t_boot + I_sensor × t_sensor + I_wifi × t_wifi + I_ble × t_ble) × V`. A *descriptive* breakdown of where `apps/main`'s energy per `Cycle` goes, populated from `apps/main`'s `Current trace` plus `I_sleep` from `apps/static-sleep`. Not the thesis deliverable: the deliverable is the measured comparison of `apps/main`'s energy per `Cycle` against comparison baseline A's energy per publication, both taken directly from the `Current trace`, at intervals of 60 s and 300 s.
+The equation `E_cycle = (I_sleep × t_sleep + I_boot × t_boot + I_sensor × t_sensor + I_wifi × t_wifi + I_teardown × t_teardown) × V`. A *descriptive* breakdown of where `apps/main`'s energy per `Cycle` goes, populated from `apps/main`'s `Current trace`, cut into phases by the `Phase marker`s, plus `I_sleep` from `apps/static-sleep`. It is validated by fitting it at one interval and predicting the energy measured at the other; only then is it used to extrapolate beyond 60 s and 300 s. Not the thesis deliverable: the deliverable is the measured comparison of `apps/main`'s energy per `Cycle` against comparison baseline A's energy per publication, both taken directly from the `Current trace`, at intervals of 60 s and 300 s.
 _Avoid_: energy equation, power model (power is `I × V`, not the whole model).
 
 **Baseline firmware**:
-An app that strips the device down to a single steady-state behaviour so that one `Current draw` term can be measured where the product firmware's current trace can't resolve it. One exists: `apps/static-sleep` (`I_sleep`). `apps/active-ble` (formerly a cross-check for `I_ble`) is cut; `I_ble` comes only from `apps/main`'s trace. Not tests, not production code paths; their sole output is a number measured *off-device*.
+An app that strips the device down to a single steady-state behaviour so that one `Current draw` term can be measured where the product firmware's current trace can't resolve it. One exists: `apps/static-sleep` (`I_sleep`). `apps/active-ble` (formerly a cross-check for `I_ble`) is cut, together with BLE in `apps/main`. Not tests, not production code paths; their sole output is a number measured *off-device*.
 _Avoid_: test firmware, measurement app, baseline app.
 
 **Comparison baseline**:
@@ -79,11 +83,11 @@ An app that implements an alternative architecture from the literature so its en
 _Avoid_: baseline (unqualified — collides with `Baseline firmware`), reference firmware, naive firmware.
 
 **Current draw**:
-The `I_*` family of variables in the `Energy model` (`I_sleep`, `I_boot`, `I_sensor`, `I_wifi`, `I_ble`). Measured *externally*: `I_boot`, `I_sensor`, `I_wifi` and `I_ble` from the current trace of `apps/main`, segmented by phase; `I_sleep` from `apps/static-sleep`. Treated as a constant per device configuration; not instrumented on-device.
+The `I_*` family of variables in the `Energy model` (`I_sleep`, `I_boot`, `I_sensor`, `I_wifi`, `I_teardown`). Measured *externally*: `I_boot`, `I_sensor`, `I_wifi` and `I_teardown` from the current trace of `apps/main`, segmented by `Phase marker`; `I_sleep` from `apps/static-sleep`. Treated as a constant per device configuration; not instrumented on-device.
 _Avoid_: current consumption (verbose), amperage, draw.
 
 **Phase duration**:
-The `t_*` family of variables in the `Energy model` (`t_sleep`, `t_boot`, `t_sensor`, `t_wifi`, `t_ble`, `t_active`). All except `t_boot` are measured *on-device* per `Cycle` in `apps/main` and published in the `status` MQTT payload. `t_boot` precedes the first on-device timestamp and exists only in the external current trace. Varies cycle to cycle.
+The `t_*` family of variables in the `Energy model` (`t_sleep`, `t_boot`, `t_sensor`, `t_wifi`, `t_teardown`, `t_active`). `t_sleep`, `t_sensor`, `t_wifi` and `t_active` are measured *on-device* per `Cycle` in `apps/main` and published in the `status` MQTT payload. `t_boot` precedes the first on-device timestamp and `t_teardown` follows the encoding of `status`, so both exist only in the external current trace. `status` also carries `t_ble_ms`, always 0 in the thesis firmware. Varies cycle to cycle.
 _Avoid_: phase time, segment duration, t-value.
 
 ### Measurement bench
@@ -109,7 +113,7 @@ The time series of samples (`seq`, `t_us`, raw shunt value, `Phase marker` code)
 _Avoid_: waveform, capture, log.
 
 **Phase marker**:
-The two-bit code the DUT drives on two GPIOs to signal its current phase (`01` sensors, `10` Wi-Fi, `11` BLE, `00` otherwise), read by the `Reader` with every sample. Lets a `Current trace` be cut into the `Energy model`'s phases.
+The two-bit code the DUT drives on two GPIOs to signal its current phase (`01` sensors, `10` Wi-Fi, `11` `Teardown`, `00` otherwise), read by the `Reader` with every sample. Lets a `Current trace` be cut into the `Energy model`'s phases. Driven by `apps/main` only; comparison baseline A needs no segmentation.
 _Avoid_: phase pin, phase flag, phase signal.
 
 **R_eff**:
@@ -123,7 +127,7 @@ _Avoid_: validation (unqualified), reader test.
 ## Flagged ambiguities
 
 **`Active phase` vs `Energy model` conservation.**
-The `Phase duration` terms `t_sensor`, `t_wifi`, `t_ble` do not currently sum to `t_active` exactly — there is unmodelled CPU-on time in the boot prologue (before the first `k_uptime_get()` in `main()`) and the sleep epilogue (cycle-counter persist + retained-RAM write + `pm_state_force` plumbing). The `Energy model` therefore does not strictly conserve over `Cycle` time. The thesis ships `apps/main` with this approximation accepted (~1 % of `E_cycle` in default config) and re-evaluates after the boot-prologue measurement gated in [ADR-0001](docs/adr/0001-active-phase-boundary.md).
+The published `t_sensor` and `t_wifi` sum to `t_active`, but the `Active phase` is longer: it also holds the boot prologue (before the first `k_uptime_get()` in `main()`), the `Teardown`, and the sleep entry after it (retained-memory write and power-off). The `Phase marker`s recover the first two from the trace as `t_boot` and `t_teardown`. Only the short stretch between the end of `11` and the drop to `I_sleep` stays unmodelled; the thesis accepts it, as [ADR-0001](docs/adr/0001-active-phase-boundary.md) does for the original brackets.
 
 ## Example dialogue
 
@@ -133,19 +137,19 @@ The `Phase duration` terms `t_sensor`, `t_wifi`, `t_ble` do not currently sum to
 >
 > **Dev:** Mixed. Both `"timer"` and `"soil_moisture_alert"` cycles do it.
 >
-> **Thesis lead:** Then it's not the wake path itself. The `Active phase` is `t_sensor + t_wifi + t_ble`; which one's blowing up?
+> **Thesis lead:** Then it's not the wake path itself. `t_active` is `t_sensor + t_wifi`; which one's blowing up?
 >
 > **Dev:** `t_wifi`. From ~600 ms baseline up to 3.5 s on the slow cycles.
 >
-> **Thesis lead:** Then it's WiFi association variance, not sensor or BLE. Check the `wifi_rssi_dbm` field in the `status` payload on the slow cycles — if they correlate with low RSSI, that's a variance-attribution data point for the thesis, not a bug. Keep them in the dataset.
+> **Thesis lead:** Then it's WiFi association variance, not the sensors. Check the `wifi_rssi_dbm` field in the `status` payload on the slow cycles — if they correlate with low RSSI, that's a variance-attribution data point for the thesis, not a bug. Keep them in the dataset.
 >
 > **Dev:** Got it. While we're here — the `I_wifi` figure I'm multiplying `t_wifi` by, is that from a recent measurement?
 >
-> **Thesis lead:** It's from the current trace of `apps/main` on the same `Device` with the same `Settings` (same `mqtt/broker`, same `wifi/ssid`), averaged over the Wi-Fi phase. If the deployment moved to a different AP, re-measure — `Current draw` during association can shift with link conditions, and the whole `Energy model` assumes those `I_*` constants are stable for the configuration.
+> **Thesis lead:** It's from the current trace of `apps/main` on the same `Device` with the same build configuration (same broker, same Wi-Fi network), averaged over the `10` samples of the Wi-Fi phase. If the deployment moved to a different AP, re-measure — `Current draw` during association can shift with link conditions, and the whole `Energy model` assumes those `I_*` constants are stable for the configuration.
 >
-> **Dev:** Last thing — I want to flush the `device/cycle_count` for a clean run. Just erase NVS?
+> **Dev:** Last thing — I want to reset `cycle_count` for a clean run. Just erase NVS?
 >
-> **Thesis lead:** Don't say NVS — that's the backing store, not what we're touching. We're clearing a `Settings` key. Hold the BOOT button through the next `Active phase` for 3 s and it triggers re-`Provisioning`, which wipes `Settings` and reboots into `Provisioning mode`. That's the supported way.
+> **Thesis lead:** There's nothing in NVS to erase: `cycle_count` lives in retained memory. Power-cycle the `Device` or reflash it and it restarts; the first `status` after that has `t_sleep_ms = null`. Do it before you start the `Run`, not during it, or the restart looks like lost publications.
 
 ## Canonical Portuguese terms (thesis)
 
@@ -156,6 +160,7 @@ The thesis is written in Brazilian Portuguese. These are the canonical PT-BR ren
 | Device | dispositivo | — |
 | Cycle | ciclo | — |
 | Active phase | fase ativa | duração medida: `t_active` |
+| Teardown | encerramento (*teardown*) | provisório — confirmar; duração: `t_teardown` |
 | Sleep / deep sleep | sono profundo | ancorar "*deep sleep*" entre parênteses na 1ª menção; duração: `t_sleep` |
 | Mode | modo | — |
 | Provisioning mode | modo de provisionamento | — |
@@ -168,7 +173,7 @@ The thesis is written in Brazilian Portuguese. These are the canonical PT-BR ren
 | Wake reason | motivo de despertar | valores em prosa: "despertar por temporizador" / "despertar por alerta de umidade do solo"; strings de fio `"timer"` / `"soil_moisture_alert"` mantidas literais |
 | Settings | configurações persistentes (*Settings*) | — |
 | Sensor reading | leitura de sensores | — |
-| Energy model | modelo de energia | a equação `E_cycle = (I_sleep·t_sleep + I_boot·t_boot + I_sensor·t_sensor + I_wifi·t_wifi + I_ble·t_ble)·V` |
+| Energy model | modelo de energia | a equação `E_cycle = (I_sleep·t_sleep + I_boot·t_boot + I_sensor·t_sensor + I_wifi·t_wifi + I_teardown·t_teardown)·V` |
 | Baseline firmware | firmware de referência | título da seção 4.5: "Firmwares de referência" |
 | Comparison baseline | firmware de comparação | provisório — confirmar |
 | Current draw | corrente de consumo | família `I_*` |
