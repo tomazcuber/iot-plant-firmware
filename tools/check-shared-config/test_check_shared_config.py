@@ -7,6 +7,7 @@ Run: python -m unittest discover -s tools/check-shared-config
 """
 import contextlib
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,25 +55,34 @@ class CheckCase(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
-    def app_build(self, name, config):
-        build = self.root / name
-        self.write(build / "zephyr/.config", config)
+    def app_build(self, app, config):
+        build = self.root / f"build-{app}"
         module = self.module.as_posix()
+        self.write(build / "zephyr/.config", config)
+        self.write(build / "CMakeCache.txt",
+                   f"APPLICATION_SOURCE_DIR:PATH=C:/zw/repo/apps/{app}\n")
         self.write(build / "zephyr_modules.txt",
                    '"hal_espressif":"C:/zw/modules/hal/espressif":"C:/zw/modules/hal/espressif/zephyr"\n'
                    f'"plant":"{module}":"{module}"\n')
         return build
 
-    def run_check(self, main=CONFIG, wifi=CONFIG, sleep_map=CLEAN_MAP):
-        main_build = self.app_build("build-main", main)
-        wifi_build = self.app_build("build-active-wifi", wifi)
-        sleep_build = self.root / "build-static-sleep"
-        self.write(sleep_build / "zephyr/zephyr.map", sleep_map)
+    def make_builds(self, main=CONFIG, active_wifi=CONFIG, static_sleep_map=CLEAN_MAP):
+        main_build = self.app_build("main", main)
+        active_wifi_build = self.app_build("active-wifi", active_wifi)
+        static_sleep_build = self.root / "build-static-sleep"
+        self.write(static_sleep_build / "CMakeCache.txt",
+                   "APPLICATION_SOURCE_DIR:PATH=C:/zw/repo/apps/static-sleep\n")
+        self.write(static_sleep_build / "zephyr/zephyr.map", static_sleep_map)
+        return main_build, active_wifi_build, static_sleep_build
+
+    def invoke(self, *builds):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            code = check_shared_config.main(
-                [str(main_build), str(wifi_build), str(sleep_build)])
+            code = check_shared_config.main([str(build) for build in builds])
         return code, out.getvalue()
+
+    def run_check(self, **inputs):
+        return self.invoke(*self.make_builds(**inputs))
 
 
 class Parity(CheckCase):
@@ -81,100 +91,118 @@ class Parity(CheckCase):
         self.assertEqual(code, 0)
 
     def test_changed_plant_value_fails_naming_symbol_and_both_values(self):
-        wifi = CONFIG.replace("CONFIG_PLANT_SOIL_DRY_ADC=3000", "CONFIG_PLANT_SOIL_DRY_ADC=2900")
-        code, out = self.run_check(wifi=wifi)
+        active_wifi = CONFIG.replace("CONFIG_PLANT_SOIL_DRY_ADC=3000", "CONFIG_PLANT_SOIL_DRY_ADC=2900")
+        code, out = self.run_check(active_wifi=active_wifi)
         self.assertEqual(code, 1)
         self.assertIn("CONFIG_PLANT_SOIL_DRY_ADC", out)
         self.assertIn("3000", out)
         self.assertIn("2900", out)
 
     def test_symbol_present_in_only_one_config_fails(self):
-        wifi = CONFIG.replace("CONFIG_PLANT_SOIL_DRY_ADC=3000\n", "")
-        code, out = self.run_check(wifi=wifi)
+        active_wifi = CONFIG.replace("CONFIG_PLANT_SOIL_DRY_ADC=3000\n", "")
+        code, out = self.run_check(active_wifi=active_wifi)
         self.assertEqual(code, 1)
         self.assertIn("CONFIG_PLANT_SOIL_DRY_ADC", out)
         self.assertIn("<absent>", out)
 
     def test_not_set_is_a_value_distinct_from_absent_and_from_y(self):
         main = CONFIG + "# CONFIG_PLANT_NET_WIFI_PS_NONE is not set\n"
-        wifi = CONFIG + "CONFIG_PLANT_NET_WIFI_PS_NONE=y\n"
-        code, out = self.run_check(main=main, wifi=wifi)
+        active_wifi = CONFIG + "CONFIG_PLANT_NET_WIFI_PS_NONE=y\n"
+        code, out = self.run_check(main=main, active_wifi=active_wifi)
         self.assertEqual(code, 1)
         self.assertIn("CONFIG_PLANT_NET_WIFI_PS_NONE: main=n active-wifi=y", out)
 
     def test_zephyr_symbol_from_snippet_is_compared(self):
-        wifi = CONFIG.replace("CONFIG_MQTT_KEEPALIVE=60", "CONFIG_MQTT_KEEPALIVE=120")
-        code, out = self.run_check(wifi=wifi)
+        active_wifi = CONFIG.replace("CONFIG_MQTT_KEEPALIVE=60", "CONFIG_MQTT_KEEPALIVE=120")
+        code, out = self.run_check(active_wifi=active_wifi)
         self.assertEqual(code, 1)
         self.assertIn("CONFIG_MQTT_KEEPALIVE: main=60 active-wifi=120", out)
 
     def test_zephyr_symbol_from_shield_is_compared(self):
-        wifi = CONFIG.replace("CONFIG_I2C=y", "# CONFIG_I2C is not set")
-        code, out = self.run_check(wifi=wifi)
+        active_wifi = CONFIG.replace("CONFIG_I2C=y", "# CONFIG_I2C is not set")
+        code, out = self.run_check(active_wifi=active_wifi)
         self.assertEqual(code, 1)
         self.assertIn("CONFIG_I2C: main=y active-wifi=n", out)
 
     def test_app_local_symbol_may_differ(self):
         main = CONFIG + "CONFIG_APP_READ_INTERVAL_S=60\n"
-        wifi = CONFIG + "CONFIG_APP_PUBLISH_INTERVAL_S=60\nCONFIG_BT=y\n"
-        code, _ = self.run_check(main=main, wifi=wifi)
+        active_wifi = CONFIG + "CONFIG_APP_PUBLISH_INTERVAL_S=60\nCONFIG_BT=y\n"
+        code, _ = self.run_check(main=main, active_wifi=active_wifi)
         self.assertEqual(code, 0)
 
 
 class StaticSleepMap(CheckCase):
     def test_plant_symbol_in_map_fails_naming_it(self):
-        sleep_map = CLEAN_MAP + " .text.plant_sensors_init  0x42000010  0x20 lib.a(sensors.c.obj)\n"
-        code, out = self.run_check(sleep_map=sleep_map)
+        static_sleep_map = CLEAN_MAP + " .text.plant_sensors_init  0x42000010  0x20 lib.a(sensors.c.obj)\n"
+        code, out = self.run_check(static_sleep_map=static_sleep_map)
         self.assertEqual(code, 1)
         self.assertIn("plant_sensors_init", out)
 
 
-class UnusableInput(CheckCase):
+class CannotCheck(CheckCase):
     """A check that cannot run must never read as a pass (exit 2, not 0 or 1)."""
 
-    def assert_unusable(self, relative_path, expected_in_output):
-        main_build = self.app_build("build-main", CONFIG)
-        wifi_build = self.app_build("build-active-wifi", CONFIG)
-        sleep_build = self.root / "build-static-sleep"
-        self.write(sleep_build / "zephyr/zephyr.map", CLEAN_MAP)
+    def assert_cannot_check_without(self, relative_path, expected_in_output):
+        builds = self.make_builds()
         (self.root / relative_path).unlink()
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            code = check_shared_config.main(
-                [str(main_build), str(wifi_build), str(sleep_build)])
+        code, out = self.invoke(*builds)
         self.assertEqual(code, 2)
-        self.assertIn(expected_in_output, out.getvalue())
+        self.assertIn(expected_in_output, out)
 
     def test_missing_config(self):
-        self.assert_unusable("build-active-wifi/zephyr/.config", ".config")
+        self.assert_cannot_check_without("build-active-wifi/zephyr/.config", ".config")
 
     def test_missing_map_is_not_a_clean_map(self):
-        self.assert_unusable("build-static-sleep/zephyr/zephyr.map", "zephyr.map")
+        self.assert_cannot_check_without("build-static-sleep/zephyr/zephyr.map", "zephyr.map")
 
     def test_missing_module_record(self):
-        self.assert_unusable("build-main/zephyr_modules.txt", "zephyr_modules.txt")
+        self.assert_cannot_check_without("build-main/zephyr_modules.txt", "zephyr_modules.txt")
 
     def test_missing_fragment(self):
-        self.assert_unusable("module/snippets/plant-net/plant-net.conf", "plant-net.conf")
+        self.assert_cannot_check_without("module/snippets/plant-net/plant-net.conf", "plant-net.conf")
+
+    def test_missing_cmake_cache(self):
+        self.assert_cannot_check_without("build-static-sleep/CMakeCache.txt", "CMakeCache.txt")
+
+    def test_empty_map_is_not_a_clean_map(self):
+        code, out = self.run_check(static_sleep_map="")
+        self.assertEqual(code, 2)
+        self.assertIn("zephyr.map", out)
 
     def test_builds_from_different_module_checkouts(self):
-        main_build = self.app_build("build-main", CONFIG)
-        wifi_build = self.app_build("build-active-wifi", CONFIG)
+        builds = self.make_builds()
         other = (self.root / "other-module").as_posix()
-        self.write(wifi_build / "zephyr_modules.txt", f'"plant":"{other}":"{other}"\n')
-        sleep_build = self.root / "build-static-sleep"
-        self.write(sleep_build / "zephyr/zephyr.map", CLEAN_MAP)
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            code = check_shared_config.main(
-                [str(main_build), str(wifi_build), str(sleep_build)])
+        self.write(builds[1] / "zephyr_modules.txt", f'"plant":"{other}":"{other}"\n')
+        code, out = self.invoke(*builds)
         self.assertEqual(code, 2)
-        self.assertIn("different", out.getvalue())
+        self.assertIn("different", out)
 
     def test_builds_that_did_not_opt_in_are_not_a_vacuous_pass(self):
-        code, out = self.run_check(main="CONFIG_BT=y\n", wifi="CONFIG_BT=y\n")
+        code, out = self.run_check(main="CONFIG_BT=y\n", active_wifi="CONFIG_BT=y\n")
         self.assertEqual(code, 2)
         self.assertIn("CONFIG_PLANT_SENSORS", out)
+
+    def test_same_app_build_given_twice(self):
+        main_build, _, static_sleep_build = self.make_builds()
+        code, out = self.invoke(main_build, main_build, static_sleep_build)
+        self.assertEqual(code, 2)
+        self.assertIn("apps/active-wifi", out)
+
+    def test_wrong_app_build_for_static_sleep(self):
+        main_build, active_wifi_build, _ = self.make_builds()
+        code, out = self.invoke(main_build, active_wifi_build, active_wifi_build)
+        self.assertEqual(code, 2)
+        self.assertIn("apps/static-sleep", out)
+
+    def test_fragment_changed_after_the_build(self):
+        builds = self.make_builds()
+        fragment = self.module / "snippets/plant-net/plant-net.conf"
+        later = (builds[1] / "zephyr/.config").stat().st_mtime + 60
+        os.utime(fragment, (later, later))
+        code, out = self.invoke(*builds)
+        self.assertEqual(code, 2)
+        self.assertIn("plant-net.conf", out)
+        self.assertIn("-p always", out)
 
 
 if __name__ == "__main__":
