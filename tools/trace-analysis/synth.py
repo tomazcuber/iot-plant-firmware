@@ -51,6 +51,7 @@ def sidecar(interval_s: Optional[float], **overrides: object) -> dict[str, objec
         "r_eff_calibrated": True,
         "offset_lsb": OFFSET_LSB,
         "offset_source": "synthetic-zero",
+        "synthetic": True,
         "note": SYNTHETIC_NOTE,
     }
     if interval_s is not None:
@@ -63,16 +64,18 @@ def write_run(directory: Path, stem: str, blocks: Iterable[Block],
               side: Optional[dict[str, object]]) -> Path:
     """Write a Run's CSV (and sidecar unless side is None); returns the CSV path."""
     path = Path(directory) / f"{stem}.csv"
-    seq = 0
+    blocks = list(blocks)
+    seq = 1
     with open(path, "w", encoding="ascii", newline="\n") as f:
         f.write("seq,t_us,shunt_raw,phase\n")
+        # A sample describes the time before it (ADR-0007), so the first one only opens the
+        # trace and each later one covers exactly one SAMPLE_US of its block.
+        f.write(f"0,0,{raw_for(blocks[0][2])},{blocks[0][0]}\n")
         for code, ms, ma in blocks:
             raw = raw_for(ma)
             for _ in range(round(ms * 1000 / SAMPLE_US)):
                 f.write(f"{seq},{seq * SAMPLE_US},{raw},{code}\n")
                 seq += 1
-        # One closing sample, so the last block's final hold has an end time.
-        f.write(f"{seq},{seq * SAMPLE_US},{raw_for(0.5)},00\n")
     if side is not None:
         path.with_suffix(".json").write_text(json.dumps(side), encoding="utf8")
     return path

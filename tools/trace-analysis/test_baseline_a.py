@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import baseline
+import baseline_a
 import runs
 import synth
 
@@ -13,7 +13,7 @@ INTERVAL = [("00", 100, 120.0), ("00", 2900, 20.0)]
 I_A_MA = 70 / 3
 
 
-class BaselineRun(unittest.TestCase):
+class BaselineARun(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -21,7 +21,7 @@ class BaselineRun(unittest.TestCase):
 
     def analyze(self, blocks):
         path = synth.write_run(self.dir, STEM, blocks, synth.sidecar(3))
-        return baseline.analyze_baseline_run(runs.load_run(path))
+        return baseline_a.analyze_baseline_a_run(runs.load_run(path))
 
     def test_mean_over_whole_intervals(self):
         result = self.analyze(INTERVAL * 5)
@@ -46,7 +46,7 @@ class BaselineRun(unittest.TestCase):
         start = 2 * 6500
         del lines[start + 1:start + 41]
         path.write_text("\n".join(lines) + "\n", newline="\n")
-        result = baseline.analyze_baseline_run(runs.load_run(path))
+        result = baseline_a.analyze_baseline_a_run(runs.load_run(path))
         self.assertEqual(result.n_intervals, 2)
         self.assertEqual(result.excluded_intervals, [2])
         self.assertAlmostEqual(result.i_a_ma, I_A_MA, places=6)

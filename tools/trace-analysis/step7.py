@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Mapping, Optional
 
 from runs import V_SUPPLY
-from summary import BaselineCondition, MainCondition
+from summary import BaselineACondition, MainCondition
 
 DEFAULT_TOLERANCE_PCT = 5.0  # the specs set no pass criterion; see the README
 
@@ -36,7 +36,6 @@ class Direction:
 @dataclass
 class Step7Result:
     directions: list[Direction]
-    tolerance_pct: float
 
     @property
     def passed(self) -> bool:
@@ -67,35 +66,56 @@ def _direction(fit: MainCondition, target: MainCondition, i_sleep_ma: float,
     )
 
 
+def _baseline_a_line(first: Optional[BaselineACondition],
+                     second: Optional[BaselineACondition]) -> Optional[tuple[float, float]]:
+    """Baseline A's energy per publication as a + b x T (mJ, mJ/s), through its two conditions.
+
+    Each publication costs a fixed amount on top of the associated idle, so I_A itself
+    depends on the interval.
+    """
+    if first is None or second is None or first.i_a_ma is None or second.i_a_ma is None:
+        return None
+    e_first = first.i_a_ma * V_SUPPLY * first.interval_s
+    e_second = second.i_a_ma * V_SUPPLY * second.interval_s
+    slope = (e_second - e_first) / (second.interval_s - first.interval_s)
+    return e_first - slope * first.interval_s, slope
+
+
 def _break_even(direction: Direction, fit: MainCondition, passed: bool,
-                baselines: Mapping[float, BaselineCondition]) -> None:
+                baselines_a: Mapping[float, BaselineACondition]) -> None:
     """Interval at which main's energy per Cycle equals baseline A's per publication.
 
     main: (Q_active + I_sleep x (T + d)) x V, where d is how far t_sleep sits from
-    the nominal interval at the fit condition. Baseline A: I_A x V x T.
+    the nominal interval at the fit condition. Baseline A: a + b x T.
     """
     if not passed:
         direction.break_even_withheld = "Step 7 did not pass in both directions"
         return
-    condition = baselines.get(fit.interval_s)
-    i_a = condition.i_a_ma if condition is not None else None
-    if i_a is None:
-        direction.break_even_withheld = f"no baseline A result at {fit.interval_s:g} s"
+    line = _baseline_a_line(baselines_a.get(direction.fit_interval_s),
+                            baselines_a.get(direction.target_interval_s))
+    if line is None:
+        direction.break_even_withheld = "needs a baseline A result at both intervals"
         return
-    i_sleep = direction.i_sleep_ma
-    if i_a <= i_sleep:
-        direction.break_even_withheld = "baseline A current is not above I_sleep"
+    fixed_mj, slope = line
+    sleep_power = direction.i_sleep_ma * V_SUPPLY
+    if slope <= sleep_power:
+        direction.break_even_withheld = "baseline A's idle power is not above main's sleep power"
         return
     offset_s = fit.mean_duration_s("sleep") - fit.interval_s
-    direction.break_even_s = (fit.active_charge_ma_s + i_sleep * offset_s) / (i_a - i_sleep)
+    main_fixed_mj = fit.active_charge_ma_s * V_SUPPLY + sleep_power * offset_s
+    break_even = (main_fixed_mj - fixed_mj) / (slope - sleep_power)
+    if break_even <= 0:
+        direction.break_even_withheld = "main uses less energy at every interval"
+        return
+    direction.break_even_s = break_even
 
 
 def validate(first: MainCondition, second: MainCondition, i_sleep_ma: float,
              tolerance_pct: float = DEFAULT_TOLERANCE_PCT,
-             baselines: Optional[Mapping[float, BaselineCondition]] = None) -> Step7Result:
+             baselines_a: Optional[Mapping[float, BaselineACondition]] = None) -> Step7Result:
     pairs = [(first, second), (second, first)]
     directions = [_direction(fit, target, i_sleep_ma, tolerance_pct) for fit, target in pairs]
-    result = Step7Result(directions, tolerance_pct)
+    result = Step7Result(directions)
     for direction, (fit, _) in zip(directions, pairs):
-        _break_even(direction, fit, result.passed, baselines or {})
+        _break_even(direction, fit, result.passed, baselines_a or {})
     return result

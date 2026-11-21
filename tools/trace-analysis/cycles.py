@@ -1,9 +1,10 @@
 """Cut a `main` Current trace into Cycles and measure each phase (main spec Steps 4-6).
 
-A Cycle runs from one rise out of the sleep floor to the next. Every sample holds
-its value until the next sample's t_us, so the phase energies sum to E_cycle exactly.
+A Cycle runs from one rise out of the sleep floor to the next. Each sample describes
+the time since the previous read (ADR-0007), so the phase energies sum to E_cycle exactly.
 """
 from dataclasses import dataclass, field
+from statistics import median
 from typing import Iterable, Optional
 
 from runs import V_SUPPLY, Run, Sample, SampleReader
@@ -15,12 +16,13 @@ _MARKED_PHASES = {"01": "sensor", "10": "wifi", "11": "teardown"}
 
 
 @dataclass(frozen=True)
-class Settings:
+class AnalysisThresholds:
     rise_threshold_ma: float = 10.0  # above the sleep floor, below any awake current
     min_sleep_s: float = 1.0         # a quieter stretch than this is a dip, not Sleep
     min_burst_ms: float = 10.0       # a shorter unmarked burst is a spike on the floor
     max_gap_ms: float = 5.0          # a longer hole in the samples excludes the Cycle
     sleep_tolerance: float = 0.10    # allowed t_sleep deviation from read_interval_s
+    sleep_jitter_ms: float = 100.0   # smallest allowed t_sleep deviation from the Run's median
 
 
 @dataclass
@@ -40,7 +42,7 @@ class _Segment:
 
 @dataclass
 class Cycle:
-    run: str
+    run_stem: str
     index: int
     start_us: int
     end_us: int
@@ -78,12 +80,12 @@ class MainRunResult:
         return [c for c in self.cycles if c.reason is None]
 
 
-def analyze_main_run(run: Run, settings: Settings = Settings()) -> MainRunResult:
+def analyze_main_run(run: Run, thresholds: AnalysisThresholds = AnalysisThresholds()) -> MainRunResult:
     reader = SampleReader(run)
-    segments = _segments(reader, settings.rise_threshold_ma)
-    stretches = _awake_stretches(segments, settings)
+    segments = _segments(reader, thresholds.rise_threshold_ma)
+    stretches = _awake_stretches(segments, thresholds)
     cycles = _build_cycles(run.stem, segments, stretches)
-    _mark_exclusions(cycles, run.interval_s, settings)
+    _mark_exclusions(cycles, run.interval_s, thresholds)
     return MainRunResult(run, cycles, reader.malformed, reader.seq_missing)
 
 
@@ -91,21 +93,19 @@ def _segments(samples: Iterable[Sample], threshold_ma: float) -> list[_Segment]:
     """Run-length encode the trace by (phase code, above threshold)."""
     segments: list[_Segment] = []
     seg: Optional[_Segment] = None
-    prev: Optional[Sample] = None
-    for sample in samples:
-        if prev is not None:
-            t0, ma, code, _ = prev
-            t1, _, _, missing = sample
+    t_prev: Optional[int] = None
+    for t_us, ma, code, missing in samples:
+        if t_prev is not None:
             high = ma > threshold_ma
             if seg is None or seg.code != code or seg.high != high:
-                seg = _Segment(code, high, t0, t1)
+                seg = _Segment(code, high, t_prev, t_us)
                 segments.append(seg)
-            hold = t1 - t0
-            seg.end_us = t1
-            seg.charge_ma_us += ma * hold
+            span = t_us - t_prev
+            seg.end_us = t_us
+            seg.charge_ma_us += ma * span
             seg.seq_missing += missing
-            seg.max_gap_us = max(seg.max_gap_us, hold)
-        prev = sample
+            seg.max_gap_us = max(seg.max_gap_us, span)
+        t_prev = t_us
     return segments
 
 
@@ -120,7 +120,7 @@ def _merge_close(spans: list[tuple[int, int]], segments: list[_Segment],
     return merged
 
 
-def _awake_stretches(segments: list[_Segment], s: Settings) -> list[tuple[int, int]]:
+def _awake_stretches(segments: list[_Segment], s: AnalysisThresholds) -> list[tuple[int, int]]:
     """Index spans (first, last) of the awake parts of the trace.
 
     Bursts first, so that isolated spikes on the sleep floor can be dropped; then
@@ -157,7 +157,7 @@ def _measure_cycle(stem: str, index: int, awake: list[_Segment],
             sequence.append(seg.code)
     t_sleep_us = sum(seg.end_us - seg.start_us for seg in asleep)
     sleep_charge = sum(seg.charge_ma_us for seg in asleep)
-    cycle = Cycle(run=stem, index=index, start_us=every[0].start_us, end_us=every[-1].end_us,
+    cycle = Cycle(run_stem=stem, index=index, start_us=every[0].start_us, end_us=every[-1].end_us,
                   sequence=tuple(sequence), t_sleep_s=t_sleep_us / 1e6,
                   seq_missing=sum(seg.seq_missing for seg in every),
                   max_gap_us=max(seg.max_gap_us for seg in every),
@@ -181,18 +181,26 @@ def _measure_cycle(stem: str, index: int, awake: list[_Segment],
     return cycle
 
 
-def _mark_exclusions(cycles: list[Cycle], interval_s: float, s: Settings) -> None:
+def _mark_exclusions(cycles: list[Cycle], interval_s: float, s: AnalysisThresholds) -> None:
     """Give every complete Cycle that can't be averaged its reason.
 
-    A sleep far from read_interval_s was cut short by a soil-alert wake (or a wake
-    went unseen), and the Cycle after it is that alert's: both stay out of the
-    timer-Cycle statistics (ADR-0009).
+    A sleep off the Run's typical timer sleep was cut short by a soil-alert wake (or
+    a wake went unseen), and the Cycle after it is that alert's: both stay out of the
+    timer-Cycle statistics (ADR-0009). The median absorbs the RTC's systematic error,
+    and five robust SDs (1.4826 x MAD) absorb its jitter.
     """
     max_gap_us = s.max_gap_ms * 1000
     previous_off = False
     complete = [c for c in cycles if c.reason is None]
+    if not complete:
+        return
+    sleeps = [c.t_sleep_s for c in complete]
+    typical = median(sleeps)
+    spread = median(abs(t - typical) for t in sleeps)
+    allowed = max(s.sleep_jitter_ms / 1000, 5 * 1.4826 * spread)
     for position, cycle in enumerate(complete):
-        sleep_off = abs(cycle.t_sleep_s / interval_s - 1) > s.sleep_tolerance
+        sleep_off = (abs(cycle.t_sleep_s - typical) > allowed
+                     or abs(cycle.t_sleep_s / interval_s - 1) > s.sleep_tolerance)
         if position == 0:
             cycle.reason = "first_cycle"
         elif cycle.sequence != EXPECTED_SEQUENCE:

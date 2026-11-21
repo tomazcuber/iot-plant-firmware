@@ -3,9 +3,9 @@ from functools import partial
 from statistics import mean, stdev
 from typing import Callable, Optional
 
-from baseline import BaselineRunResult
+from baseline_a import BaselineARunResult
 from cycles import ACTIVE_PHASES, PHASES, Cycle, MainRunResult
-from runs import V_SUPPLY, record
+from runs import V_SUPPLY
 
 Row = dict[str, object]
 
@@ -53,7 +53,7 @@ class MainCondition:
 
     @property
     def lsb_ma(self) -> float:
-        return float(record.shunt_raw_to_ma(1, self.results[0].run.r_eff_ohm))
+        return self.results[0].run.lsb_ma
 
     def rows(self) -> list[Row]:
         def per_run(value: Callable[[Cycle], Optional[float]]) -> list[list[float]]:
@@ -69,10 +69,10 @@ class MainCondition:
         return rows
 
 
-class BaselineCondition:
+class BaselineACondition:
     """All the Runs of baseline A at one publication interval."""
 
-    def __init__(self, results: list[BaselineRunResult]) -> None:
+    def __init__(self, results: list[BaselineARunResult]) -> None:
         self.results = results
         self.interval_s = results[0].run.interval_s
 

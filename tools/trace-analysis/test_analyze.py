@@ -122,6 +122,34 @@ class Cli(unittest.TestCase):
         self.assertEqual(report["status"], "not_run")
         self.assertIn("--i-sleep-ma", report["reason"])
 
+    def test_a_glob_that_also_matches_sidecars_reads_only_the_csvs(self):
+        write_campaign(self.data)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            analyze.main([str(self.data / "20261121-120001_main_*"), "--out", str(self.out)])
+        self.assertEqual(self.load("report.json")["skipped"], {})
+
+    def test_synthetic_runs_are_labelled_in_every_summary(self):
+        write_campaign(self.data)
+        _, stdout = self.run_cli("--i-sleep-ma", "0.5")
+        self.assertIn("SYNTHETIC", stdout)
+        self.assertEqual(self.load("main_6s.json")["data_source"], "synthetic")
+        self.assertEqual(self.load("step7.json")["data_source"], "synthetic")
+        for name in ("main_6s.csv", "main_6s_cycles.csv", "active-wifi_6s.csv"):
+            with open(self.out / name, newline="", encoding="utf8") as f:
+                self.assertEqual({r["data_source"] for r in csv.DictReader(f)}, {"synthetic"})
+
+    def test_per_cycle_csv_gives_a_wall_time_for_pairing_with_status_rows(self):
+        good = synth.CycleShape(sleep_s=6)
+        side = synth.sidecar(6, start_time="2026-11-21T12:00:00")
+        synth.write_run(self.data, "20261121-120000_main_trace_r1",
+                        synth.main_blocks([good] * 2), side)
+        self.run_cli()
+        with open(self.out / "main_6s_cycles.csv", newline="", encoding="utf8") as f:
+            first = next(csv.DictReader(f))
+        # The first rise follows the 1 s lead-in sleep.
+        self.assertEqual(first["approx_wall_time"], "2026-11-21T12:00:01")
+
     def test_no_analysable_run_is_an_error(self):
         code, _ = self.run_cli("--i-sleep-ma", "0.5")
         self.assertEqual(code, 2)

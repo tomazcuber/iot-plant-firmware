@@ -6,8 +6,9 @@ import json
 import re
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "ina219-reader" / "host"))
 import record  # type: ignore[import-not-found]  # noqa: E402
@@ -33,6 +34,12 @@ class Run:
     offset_lsb: float
     offset_source: str
     r_eff_calibrated: bool
+    synthetic: bool = False
+    start_time: Optional[datetime] = None  # host clock, whole seconds
+
+    @property
+    def lsb_ma(self) -> float:
+        return float(record.shunt_raw_to_ma(1, self.r_eff_ohm))
 
     @property
     def warnings(self) -> list[str]:
@@ -71,9 +78,18 @@ def load_run(csv_path: Path) -> Run:
                    interval_s=float(side["read_interval_s"]),
                    r_eff_ohm=float(side["r_eff_ohm"]), offset_lsb=float(side["offset_lsb"]),
                    offset_source=str(side.get("offset_source", "")),
-                   r_eff_calibrated=bool(side.get("r_eff_calibrated", False)))
+                   r_eff_calibrated=bool(side.get("r_eff_calibrated", False)),
+                   synthetic=side.get("synthetic") is True,
+                   start_time=_parse_time(side.get("start_time")))
     except (KeyError, TypeError, ValueError) as exc:
         raise RunSkipped(f"incomplete sidecar: {exc}") from None
+
+
+def _parse_time(value: object) -> Optional[datetime]:
+    try:
+        return datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        return None
 
 
 class SampleReader:

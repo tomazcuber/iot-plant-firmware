@@ -121,6 +121,20 @@ class Segmentation(RunBuilder):
                          ["first_cycle", "sleep_off_interval", "after_interrupted_sleep",
                           "incomplete"])
 
+    def test_an_alert_shortly_before_the_timer_is_still_excluded(self):
+        # 2.8 s of a 3 s sleep is inside 10 % of nominal, but far outside timer jitter.
+        middle = SHAPE.active_blocks() + [("00", 2800, 0.5)]
+        result = self.analyze_with_middle(middle)
+        self.assertEqual([c.reason for c in result.cycles],
+                         ["first_cycle", "sleep_off_interval", "after_interrupted_sleep",
+                          "incomplete"])
+
+    def test_ordinary_timer_jitter_is_kept(self):
+        middle = SHAPE.active_blocks() + [("00", 3050, 0.5)]
+        result = self.analyze_with_middle(middle)
+        self.assertEqual([c.reason for c in result.cycles],
+                         ["first_cycle", None, None, "incomplete"])
+
     def test_a_hole_in_the_samples_excludes_the_cycle(self):
         blocks = [("00", 1000, 0.5)] + SHAPE.blocks() * 3 + SHAPE.active_blocks() \
             + [("00", 1000, 0.5)]

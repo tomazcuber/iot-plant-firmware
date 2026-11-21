@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import baseline
+import baseline_a
 import cycles
 import runs
 import step7
@@ -18,11 +18,18 @@ def main_condition(directory, shape, interval_s, run=1):
     return summary.MainCondition([cycles.analyze_main_run(runs.load_run(path))])
 
 
-def baseline_condition(directory, interval_s, ma):
+def baseline_a_condition(directory, interval_s, ma):
     stem = f"20261121-1300{interval_s:02d}_active-wifi_trace_r1"
     path = synth.write_run(Path(directory), stem, [("00", interval_s * 3000, ma)],
                            synth.sidecar(interval_s))
-    return summary.BaselineCondition([baseline.analyze_baseline_run(runs.load_run(path))])
+    return summary.BaselineACondition([baseline_a.analyze_baseline_a_run(runs.load_run(path))])
+
+
+def bursty_baseline_a_condition(directory, interval_s):
+    stem = f"20261121-1400{interval_s:02d}_active-wifi_trace_r1"
+    blocks = [("00", 100, 120.0), ("00", interval_s * 1000 - 100, 20.0)] * 3
+    path = synth.write_run(Path(directory), stem, blocks, synth.sidecar(interval_s))
+    return summary.BaselineACondition([baseline_a.analyze_baseline_a_run(runs.load_run(path))])
 
 
 class Pair60300(unittest.TestCase):
@@ -93,27 +100,45 @@ class SmallPair(unittest.TestCase):
     def test_break_even_sits_next_to_a_passing_error(self):
         fit = main_condition(self.d, synth.CycleShape(sleep_s=6), 6, run=1)
         target = main_condition(self.d, synth.CycleShape(sleep_s=30), 30, run=2)
-        baselines = {6: baseline_condition(self.d, 6, 30.0),
-                     30: baseline_condition(self.d, 30, 30.0)}
-        result = step7.validate(fit, target, I_SLEEP_MA, baselines=baselines)
+        baselines_a = {6: baseline_a_condition(self.d, 6, 30.0),
+                     30: baseline_a_condition(self.d, 30, 30.0)}
+        result = step7.validate(fit, target, I_SLEEP_MA, baselines_a=baselines_a)
         self.assertTrue(result.passed)
         for direction in result.directions:
             # 207.125 mA s active / (30 - 0.5) mA
             self.assertAlmostEqual(direction.break_even_s, 7.02119, places=4)
             self.assertIsNone(direction.break_even_withheld)
 
+    def test_break_even_accounts_for_baseline_a_publication_cost(self):
+        fit = main_condition(self.d, synth.CycleShape(sleep_s=6), 6, run=1)
+        target = main_condition(self.d, synth.CycleShape(sleep_s=30), 30, run=2)
+        # Each publication: 100 ms at 120 mA, idle at 20 mA. E_A(T) = 50 + 100 T mJ.
+        baselines_a = {t: bursty_baseline_a_condition(self.d, t) for t in (6, 30)}
+        result = step7.validate(fit, target, I_SLEEP_MA, baselines_a=baselines_a)
+        for direction in result.directions:
+            # (207.125 x 5 - 50) / (100 - 0.5 x 5)
+            self.assertAlmostEqual(direction.break_even_s, 10.10897, places=4)
+
+    def test_break_even_needs_baseline_a_at_both_intervals(self):
+        fit = main_condition(self.d, synth.CycleShape(sleep_s=6), 6, run=1)
+        target = main_condition(self.d, synth.CycleShape(sleep_s=30), 30, run=2)
+        baselines_a = {6: baseline_a_condition(self.d, 6, 30.0)}
+        for direction in step7.validate(fit, target, I_SLEEP_MA, baselines_a=baselines_a).directions:
+            self.assertIsNone(direction.break_even_s)
+            self.assertIn("both intervals", direction.break_even_withheld)
+
     def test_break_even_is_withheld_when_step_7_fails(self):
         fit = main_condition(self.d, synth.CycleShape(sleep_s=6, wifi_ma=150.0), 6, run=1)
         target = main_condition(self.d, synth.CycleShape(sleep_s=30), 30, run=2)
-        baselines = {6: baseline_condition(self.d, 6, 30.0),
-                     30: baseline_condition(self.d, 30, 30.0)}
-        result = step7.validate(fit, target, I_SLEEP_MA, baselines=baselines)
+        baselines_a = {6: baseline_a_condition(self.d, 6, 30.0),
+                     30: baseline_a_condition(self.d, 30, 30.0)}
+        result = step7.validate(fit, target, I_SLEEP_MA, baselines_a=baselines_a)
         self.assertFalse(result.passed)
         for direction in result.directions:
             self.assertIsNone(direction.break_even_s)
             self.assertIn("Step 7", direction.break_even_withheld)
 
-    def test_no_baseline_means_no_break_even(self):
+    def test_no_baseline_a_means_no_break_even(self):
         fit = main_condition(self.d, synth.CycleShape(sleep_s=6), 6, run=1)
         target = main_condition(self.d, synth.CycleShape(sleep_s=30), 30, run=2)
         forward = step7.validate(fit, target, I_SLEEP_MA).directions[0]
