@@ -12,5 +12,17 @@
 		 * in one masked register write. */
 		marker-gpios = <&gpio0 18 GPIO_ACTIVE_HIGH>,
 			       <&gpio0 19 GPIO_ACTIVE_HIGH>;
+
+		/* LM393 DO, the deep-sleep wake source (FR-MA-06, SM-06). "Active"
+		 * means past the threshold (dry). The polarity is NOT yet confirmed
+		 * on the bench (#26): if DO reads low when dry, change this one
+		 * flag to GPIO_ACTIVE_LOW. No internal pull: the module drives DO. */
+		soil-alert-gpios = <&gpio0 6 GPIO_ACTIVE_HIGH>;
 	};
+};
+
+/* Unused (CONFIG_SPI is off), but the board's default pinctrl for it claims
+ * GPIO6 as SCLK. */
+&spi2 {
+	status = "disabled";
 };

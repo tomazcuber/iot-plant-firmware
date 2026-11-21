@@ -201,10 +201,11 @@ static const plant::CycleConfig cfg = {
 /* Wake at uptime 50 ms (the boot prologue precedes step 1). */
 static const int64_t T_ACTIVE_START = 50;
 
-/* The retained state of the first boot, and of the 8th Cycle woken by the
- * timer after a 60 s Sleep (retained.h). */
-static const plant::WakeState first_wake = {0, false, 0};
-static const plant::WakeState timer_wake = {7, true, 60000};
+/* The retained state of the first boot, of the 8th Cycle woken by the timer
+ * after a 60 s Sleep, and of the 9th woken by a soil alert (retained.h). */
+static const plant::WakeState first_wake = {0, false, 0, PLANT_WAKE_TIMER, false};
+static const plant::WakeState timer_wake = {7, true, 60000, PLANT_WAKE_TIMER, true};
+static const plant::WakeState alert_wake = {8, true, 12250, PLANT_WAKE_SOIL_MOISTURE_ALERT, true};
 
 static void fresh_wake()
 {
@@ -284,6 +285,24 @@ static void test_timer_wake_publishes_cycle_count_and_t_sleep()
 		  "{\"wake_reason\":\"timer\",\"t_active_ms\":965,\"t_sensor_ms\":120,"
 		  "\"t_wifi_ms\":845,\"t_ble_ms\":0,\"t_sleep_ms\":60000,"
 		  "\"wifi_rssi_dbm\":-55,\"cycle_count\":7,"
+		  "\"timestamp_ms\":1712000000080}");
+}
+
+/* A soil alert runs the same Active phase as a timer wake; only wake_reason
+ * and the measured t_sleep_ms differ (ADR-0002, issue #26). */
+static void test_soil_alert_publishes_its_wake_reason_and_measured_sleep()
+{
+	fresh_wake();
+
+	plant::CycleResult r = plant::run_cycle(cfg, alert_wake, T_ACTIVE_START);
+
+	CHECK(r.error == 0);
+	CHECK_STR(calls, "Is2NWSMPR3PFDX");
+	CHECK(n_published == 2);
+	CHECK_STR(published[1].payload,
+		  "{\"wake_reason\":\"soil_moisture_alert\",\"t_active_ms\":965,"
+		  "\"t_sensor_ms\":120,\"t_wifi_ms\":845,\"t_ble_ms\":0,\"t_sleep_ms\":12250,"
+		  "\"wifi_rssi_dbm\":-55,\"cycle_count\":8,"
 		  "\"timestamp_ms\":1712000000080}");
 }
 
@@ -461,6 +480,7 @@ int main()
 	test_cycle_runs_the_wake_sequence_in_order();
 	test_cycle_publishes_raw_then_status_with_phase_durations();
 	test_timer_wake_publishes_cycle_count_and_t_sleep();
+	test_soil_alert_publishes_its_wake_reason_and_measured_sleep();
 	test_wifi_failure_skips_publishing_and_tears_down();
 	test_mqtt_failure_skips_publishing_and_disconnects_wifi();
 	test_failed_raw_publish_skips_status_and_tears_down();

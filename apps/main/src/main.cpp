@@ -1,8 +1,8 @@
-/* apps/main, reduced for the thesis comparison (issue #22): a timer-only
- * Cycle. Each boot is one Cycle: run the Active phase, then Sleep for
- * CONFIG_APP_READ_INTERVAL_S. There is no application loop; the RTC timer
- * wake is a fresh boot, and the retained struct (retained.h) is all that one
- * Cycle hands the next (issue #24). */
+/* apps/main, reduced for the thesis comparison (issue #22). Each boot is one
+ * Cycle: run the Active phase, then Sleep for CONFIG_APP_READ_INTERVAL_S or
+ * until the soil-moisture comparator wakes the device (issue #26). There is no
+ * application loop; a wake is a fresh boot, and the retained struct
+ * (retained.h) is all that one Cycle hands the next (issue #24). */
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/logging/log_ctrl.h>
@@ -45,9 +45,11 @@ int main(void)
 
 	phase_markers_set(PHASE_MARKER_SENSORS);
 
-	/* Step 2a: this Cycle's number and the Sleep that preceded it. */
+	/* Steps 2 and 2a: the wake reason, this Cycle's number and the Sleep
+	 * that preceded it. */
 	main_retained &retained = *sleep_retained();
-	const plant::WakeState wake = plant::retained_on_wake(retained, sleep_woke());
+	const plant::WakeState wake = plant::retained_on_wake(
+		retained, sleep_woke(), sleep_wake_reason(), sleep_rtc_ticks());
 
 	LOG_WRN("main: device %s, read interval %d s, cycle %u, %s", CONFIG_APP_DEVICE_NAME,
 		CONFIG_APP_READ_INTERVAL_S, wake.cycle_count,
@@ -64,13 +66,22 @@ int main(void)
 		r.t_sensor_ms, r.t_wifi_ms, r.t_active_ms,
 		(uint32_t)(k_uptime_get() - t_active_start_ms));
 
-	/* Step 19: the record the next Cycle reads, with the Sleep length
-	 * that is about to be armed. */
+	/* The wake-loop rule (ADR-0009): whether the next Sleep arms GPIO6. */
+	const bool soil_past = sleep_soil_past_threshold();
+	const bool soil_wake = plant::soil_wake_next(wake, soil_past);
+
+	LOG_WRN("wake %s, soil %s threshold, next Sleep %s",
+		wake.wake_reason == PLANT_WAKE_SOIL_MOISTURE_ALERT ? "soil_moisture_alert"
+								   : "timer",
+		soil_past ? "past" : "within", soil_wake ? "timer + GPIO6" : "timer only");
+
+	/* Step 19: the record the next Cycle reads, with the Sleep length and
+	 * wake sources that are about to be armed. */
 	const uint32_t sleep_s = CONFIG_APP_READ_INTERVAL_S;
 
-	plant::retained_on_sleep(retained, sleep_rtc_ms(), sleep_s * 1000U);
+	plant::retained_on_sleep(retained, sleep_rtc_ticks(), sleep_s * 1000U, soil_wake);
 
 	/* Deferred logging: print everything before the power goes. */
 	LOG_PANIC();
-	sleep_for(sleep_s);
+	sleep_for(sleep_s, soil_wake);
 }

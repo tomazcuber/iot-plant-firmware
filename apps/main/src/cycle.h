@@ -46,8 +46,8 @@ int64_t cycle_uptime_ms();
  * t_active_start_ms is the uptime recorded at wake entry (FR-MA-07 step 1).
  * Never retries: a failed WiFi or MQTT step skips the publishing, and the
  * function still returns with the radio torn down, ready for Sleep.
- * wake_reason is always "timer" in this slice; cycle_count and t_sleep_ms
- * come from `wake` (retained_on_wake()).
+ * wake_reason, cycle_count and t_sleep_ms come from `wake`
+ * (retained_on_wake()); both wake reasons run the same sequence.
  * Sets the phase markers `10` at t_wifi_start and `11` where t_wifi_ms stops
  * (FR-MA-18), on every path; the caller sets `01` before and `00` after. */
 CycleResult run_cycle(const CycleConfig &cfg, const WakeState &wake, int64_t t_active_start_ms);

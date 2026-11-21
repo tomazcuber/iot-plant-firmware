@@ -85,7 +85,7 @@ int publish_cycle(WifiPhase &p)
 		return ret;
 	}
 
-	status.wake_reason = PLANT_WAKE_TIMER;
+	status.wake_reason = p.wake.wake_reason;
 	status.present = PLANT_STATUS_WAKE_REASON | PLANT_STATUS_T_ACTIVE_MS |
 			 PLANT_STATUS_T_SENSOR_MS | PLANT_STATUS_T_WIFI_MS | PLANT_STATUS_T_BLE_MS |
 			 PLANT_STATUS_CYCLE_COUNT;
