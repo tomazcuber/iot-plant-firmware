@@ -9,6 +9,8 @@
 
 #include <stdint.h>
 
+#include "retained.h"
+
 namespace plant {
 
 struct CycleConfig {
@@ -28,8 +30,7 @@ struct CycleResult {
 	int error;
 	/* The Phase durations as published in `status` (FR-MA-16). Measured up
 	 * to the moment `status` is encoded: the MQTT and WiFi teardown that
-	 * follows is in no t_* term (this slice has no retained state to carry
-	 * it to the next Cycle). t_ble_ms is always 0 (BLE is cut). */
+	 * follows is in no t_* term. t_ble_ms is always 0 (BLE is cut). */
 	uint32_t t_sensor_ms;
 	uint32_t t_wifi_ms;
 	uint32_t t_active_ms;
@@ -41,12 +42,13 @@ int64_t cycle_uptime_ms();
 /* Run one Active phase: read the sensors, connect WiFi, try SNTP once,
  * connect MQTT, publish sensors/raw, sample RSSI, publish status, confirm
  * that the broker received both (ADR-0010), then disconnect MQTT and WiFi.
- * An unconfirmed delivery fails the Cycle like a failed publish. t_active_start_ms is the uptime recorded at wake
- * entry (FR-MA-07 step 1). Never retries: a failed WiFi or MQTT step skips
- * the publishing, and the function still returns with the radio torn down,
- * ready for Sleep. wake_reason is always "timer" in this slice, and
- * cycle_count and t_sleep_ms are null (no retained state yet). */
-CycleResult run_cycle(const CycleConfig &cfg, int64_t t_active_start_ms);
+ * An unconfirmed delivery fails the Cycle like a failed publish.
+ * t_active_start_ms is the uptime recorded at wake entry (FR-MA-07 step 1).
+ * Never retries: a failed WiFi or MQTT step skips the publishing, and the
+ * function still returns with the radio torn down, ready for Sleep.
+ * wake_reason is always "timer" in this slice; cycle_count and t_sleep_ms
+ * come from `wake` (retained_on_wake()). */
+CycleResult run_cycle(const CycleConfig &cfg, const WakeState &wake, int64_t t_active_start_ms);
 
 } // namespace plant
 

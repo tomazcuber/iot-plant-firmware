@@ -14,6 +14,7 @@ namespace {
 /* The WiFi phase's inputs from the sensor phase, and the result it fills. */
 struct WifiPhase {
 	const CycleConfig &cfg;
+	const WakeState &wake;
 	const plant_sensor_values &values;
 	int64_t t_wifi_start_ms;
 	CycleResult &result;
@@ -82,7 +83,13 @@ int publish_cycle(WifiPhase &p)
 
 	status.wake_reason = PLANT_WAKE_TIMER;
 	status.present = PLANT_STATUS_WAKE_REASON | PLANT_STATUS_T_ACTIVE_MS |
-			 PLANT_STATUS_T_SENSOR_MS | PLANT_STATUS_T_WIFI_MS | PLANT_STATUS_T_BLE_MS;
+			 PLANT_STATUS_T_SENSOR_MS | PLANT_STATUS_T_WIFI_MS | PLANT_STATUS_T_BLE_MS |
+			 PLANT_STATUS_CYCLE_COUNT;
+	status.cycle_count = p.wake.cycle_count;
+	if (p.wake.t_sleep_valid) {
+		status.t_sleep_ms = p.wake.t_sleep_ms;
+		status.present |= PLANT_STATUS_T_SLEEP_MS;
+	}
 	if (plant_wifi_rssi(&rssi) == 0) {
 		status.wifi_rssi_dbm = rssi;
 		status.present |= PLANT_STATUS_WIFI_RSSI_DBM;
@@ -110,7 +117,7 @@ int publish_cycle(WifiPhase &p)
 
 } // namespace
 
-CycleResult run_cycle(const CycleConfig &cfg, int64_t t_active_start_ms)
+CycleResult run_cycle(const CycleConfig &cfg, const WakeState &wake, int64_t t_active_start_ms)
 {
 	CycleResult result = {};
 	plant_sensor_values values = {};
@@ -121,7 +128,7 @@ CycleResult run_cycle(const CycleConfig &cfg, int64_t t_active_start_ms)
 	(void)plant_sensors_init();
 	(void)plant_sensors_read(&values);
 
-	WifiPhase p = {cfg, values, cycle_uptime_ms(), result};
+	WifiPhase p = {cfg, wake, values, cycle_uptime_ms(), result};
 
 	result.t_sensor_ms = (uint32_t)(p.t_wifi_start_ms - t_active_start_ms);
 
