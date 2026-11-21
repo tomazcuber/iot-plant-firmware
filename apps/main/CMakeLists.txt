@@ -19,4 +19,4 @@ endif()
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(main CXX C)
 target_sources(app PRIVATE src/main.cpp src/cycle.cpp src/retained.cpp
-  src/sleep_esp32.c)
+  src/sleep_esp32.c src/phase_markers.c)
