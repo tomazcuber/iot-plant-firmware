@@ -6,6 +6,7 @@
 #include <plant/types.h>
 
 #include "cycle.h"
+#include "phase_markers.h"
 
 namespace plant {
 
@@ -21,10 +22,13 @@ struct WifiPhase {
 };
 
 /* Close the WiFi phase at the current uptime (FR-MA-16, cut early: see
- * CycleResult). t_active_ms = t_sensor_ms + t_wifi_ms + t_ble_ms, t_ble_ms = 0. */
+ * CycleResult). t_active_ms = t_sensor_ms + t_wifi_ms + t_ble_ms, t_ble_ms = 0.
+ * The Teardown starts here, on every path (FR-MA-18): each one calls this
+ * exactly once. */
 void stop_clock(WifiPhase &p)
 {
 	p.result.t_wifi_ms = (uint32_t)(cycle_uptime_ms() - p.t_wifi_start_ms);
+	phase_markers_set(PHASE_MARKER_TEARDOWN);
 	p.result.t_active_ms = p.result.t_sensor_ms + p.result.t_wifi_ms;
 }
 
@@ -130,6 +134,7 @@ CycleResult run_cycle(const CycleConfig &cfg, const WakeState &wake, int64_t t_a
 
 	WifiPhase p = {cfg, wake, values, cycle_uptime_ms(), result};
 
+	phase_markers_set(PHASE_MARKER_WIFI); /* at t_wifi_start (FR-MA-18) */
 	result.t_sensor_ms = (uint32_t)(p.t_wifi_start_ms - t_active_start_ms);
 
 	/* WiFi phase (steps 4a-11). */

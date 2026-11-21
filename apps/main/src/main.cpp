@@ -8,6 +8,7 @@
 #include <zephyr/logging/log_ctrl.h>
 
 #include "cycle.h"
+#include "phase_markers.h"
 #include "sleep.h"
 
 LOG_MODULE_REGISTER(main_app, LOG_LEVEL_WRN);
@@ -34,8 +35,15 @@ const plant::CycleConfig cycle_cfg = {
 
 int main(void)
 {
+	/* Configure the marker pins first, so the timestamp and `01` are
+	 * adjacent (FR-MA-18). Instrumentation only: a failed init leaves the
+	 * markers silent and the Cycle unchanged. */
+	(void)phase_markers_init();
+
 	/* FR-MA-07 step 1: the first timestamp of the Active phase. */
 	const int64_t t_active_start_ms = k_uptime_get();
+
+	phase_markers_set(PHASE_MARKER_SENSORS);
 
 	/* Step 2a: this Cycle's number and the Sleep that preceded it. */
 	main_retained &retained = *sleep_retained();

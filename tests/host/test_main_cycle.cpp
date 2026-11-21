@@ -1,7 +1,8 @@
 /* Host tests for apps/main's Active phase (issue #22): the Cycle's call
  * sequence (FR-MA-07), discard-on-failure (DD-MA-02), null fields
- * (FR-MA-08a, DD-MA-11), the Phase durations in `status` (FR-MA-16) and the
- * delivery confirmation before teardown (ADR-0010).
+ * (FR-MA-08a, DD-MA-11), the Phase durations in `status` (FR-MA-16), the
+ * delivery confirmation before teardown (ADR-0010) and the phase markers
+ * `10` and `11` (FR-MA-18, issue #28).
  * The payloads come from the real plant_json encoder. */
 #include <errno.h>
 #include <stdint.h>
@@ -13,6 +14,7 @@
 #include <plant/types.h>
 
 #include "cycle.h"
+#include "phase_markers.h"
 
 static int failures;
 
@@ -33,14 +35,18 @@ static int failures;
 		}                                                             \
 	} while (0)
 
-/* Fake clock and fake hardware (the seams are <plant/sensors.h> and
- * <plant/net.h>). Each fake advances the clock by its scripted duration and
- * appends a letter to `calls`: I sensors init, s sensors read, N net init,
- * W wifi connect, S sntp, M mqtt connect, P publish, R rssi, F mqtt flush,
- * D mqtt disconnect, X wifi disconnect. */
+/* Fake clock and fake hardware (the seams are <plant/sensors.h>,
+ * <plant/net.h> and phase_markers.h). Each fake advances the clock by its
+ * scripted duration and appends a letter to `calls`: I sensors init,
+ * s sensors read, N net init, W wifi connect, S sntp, M mqtt connect,
+ * P publish, R rssi, F mqtt flush, D mqtt disconnect, X wifi disconnect.
+ * A phase marker appends its code as a digit (2 = `10`, 3 = `11`) and takes
+ * no time. */
 static int64_t now_ms;
 static char calls[64];
-static int wifi_ret, sntp_ret, mqtt_ret, publish_ret, rssi_ret, flush_ret;
+static int net_ret, wifi_ret, sntp_ret, mqtt_ret, publish_ret, rssi_ret, flush_ret;
+/* The uptime at which the `10` and `11` markers were set; -1 = never. */
+static int64_t marker_wifi_ms, marker_teardown_ms;
 /* 1-based index of the publish that fails with -ENOTCONN; 0 = none. */
 static int publish_fail_at, publish_count;
 static uint8_t sensors_valid;
@@ -95,7 +101,7 @@ int plant_sensors_read(struct plant_sensor_values *out)
 int plant_net_init(void)
 {
 	log_call('N', 0);
-	return 0;
+	return net_ret;
 }
 
 int plant_wifi_connect(const char *ssid, const char *psk, int32_t timeout_ms)
@@ -176,6 +182,16 @@ int plant_mqtt_poll(int32_t timeout_ms)
 	return 0;
 }
 
+void phase_markers_set(enum phase_marker code)
+{
+	log_call((char)('0' + (int)code), 0);
+	if (code == PHASE_MARKER_WIFI) {
+		marker_wifi_ms = now_ms;
+	} else if (code == PHASE_MARKER_TEARDOWN) {
+		marker_teardown_ms = now_ms;
+	}
+}
+
 } /* extern "C" */
 
 static const plant::CycleConfig cfg = {
@@ -194,7 +210,8 @@ static void fresh_wake()
 {
 	now_ms = T_ACTIVE_START;
 	calls[0] = '\0';
-	wifi_ret = sntp_ret = mqtt_ret = publish_ret = rssi_ret = flush_ret = 0;
+	net_ret = wifi_ret = sntp_ret = mqtt_ret = publish_ret = rssi_ret = flush_ret = 0;
+	marker_wifi_ms = marker_teardown_ms = -1;
 	sensors_valid = 0x7f;
 	publish_fail_at = publish_count = 0;
 	n_published = 0;
@@ -211,7 +228,7 @@ static void test_cycle_runs_the_wake_sequence_in_order()
 	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == 0);
-	CHECK_STR(calls, "IsNWSMPRPFDX");
+	CHECK_STR(calls, "Is2NWSMPR3PFDX");
 	CHECK_STR(last_ssid, "lab-ap");
 	CHECK_STR(last_psk, "password");
 	CHECK_STR(last_broker, "10.0.0.2");
@@ -280,7 +297,7 @@ static void test_wifi_failure_skips_publishing_and_tears_down()
 	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == -ETIMEDOUT);
-	CHECK_STR(calls, "IsNWX");
+	CHECK_STR(calls, "Is2NW3X");
 	CHECK(n_published == 0);
 }
 
@@ -294,7 +311,7 @@ static void test_mqtt_failure_skips_publishing_and_disconnects_wifi()
 	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == -ECONNREFUSED);
-	CHECK_STR(calls, "IsNWSMX");
+	CHECK_STR(calls, "Is2NWSM3X");
 	CHECK(n_published == 0);
 }
 
@@ -308,7 +325,7 @@ static void test_failed_raw_publish_skips_status_and_tears_down()
 	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == -ENOTCONN);
-	CHECK_STR(calls, "IsNWSMPDX");
+	CHECK_STR(calls, "Is2NWSMP3DX");
 }
 
 /* ADR-0010: when the broker doesn't confirm delivery in time, the Cycle
@@ -322,7 +339,7 @@ static void test_unconfirmed_delivery_fails_the_cycle_and_tears_down()
 	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == -ETIMEDOUT);
-	CHECK_STR(calls, "IsNWSMPRPFDX");
+	CHECK_STR(calls, "Is2NWSMPR3PFDX");
 	CHECK(n_published == 2);
 	CHECK(r.t_active_ms == 965);
 }
@@ -336,7 +353,7 @@ static void test_failed_status_publish_skips_confirmation()
 	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == -ENOTCONN);
-	CHECK_STR(calls, "IsNWSMPRPDX");
+	CHECK_STR(calls, "Is2NWSMPR3PDX");
 }
 
 /* DD-MA-11: one SNTP attempt; on failure timestamp_ms is null in both payloads
@@ -349,7 +366,7 @@ static void test_sntp_failure_publishes_null_timestamps()
 	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
 
 	CHECK(r.error == 0);
-	CHECK_STR(calls, "IsNWSMPRPFDX");
+	CHECK_STR(calls, "Is2NWSMPR3PFDX");
 	CHECK(n_published == 2);
 	CHECK(strstr(published[0].payload, "\"timestamp_ms\":null}") != nullptr);
 	CHECK(strstr(published[1].payload, "\"timestamp_ms\":null}") != nullptr);
@@ -387,6 +404,58 @@ static void test_rssi_failure_publishes_null_rssi()
 	CHECK(strstr(published[1].payload, "\"wifi_rssi_dbm\":null,") != nullptr);
 }
 
+/* A failed network init skips the WiFi connect but still closes the WiFi
+ * phase: `10` then `11`, and the interface is brought down. */
+static void test_net_init_failure_marks_teardown_and_tears_down()
+{
+	fresh_wake();
+	net_ret = -EIO;
+
+	plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
+
+	CHECK(r.error == -EIO);
+	CHECK_STR(calls, "Is2N3X");
+	CHECK(n_published == 0);
+}
+
+/* FR-MA-18: `10` is set once, at t_wifi_start, and `11` once, where
+ * t_wifi_ms stops, so the trace segments match the published t_sensor_ms and
+ * t_wifi_ms. The run_cycle caller sets `01` at t_active_start (main.cpp). */
+static void check_markers_on_phase_boundaries(const plant::CycleResult &r)
+{
+	CHECK(strchr(calls, '2') != nullptr && strchr(calls, '2') == strrchr(calls, '2'));
+	CHECK(strchr(calls, '3') != nullptr && strchr(calls, '3') == strrchr(calls, '3'));
+	CHECK(marker_wifi_ms - T_ACTIVE_START == r.t_sensor_ms);
+	CHECK(marker_teardown_ms - marker_wifi_ms == r.t_wifi_ms);
+}
+
+static void test_markers_fall_on_the_published_phase_boundaries()
+{
+	fresh_wake();
+
+	check_markers_on_phase_boundaries(plant::run_cycle(cfg, first_wake, T_ACTIVE_START));
+}
+
+/* The same on every failure path of the Cycle. */
+static void test_failed_cycle_marks_teardown_where_t_wifi_stops()
+{
+	static void (*const fail[])() = {
+		[] { net_ret = -EIO; },	     [] { wifi_ret = -EIO; },
+		[] { mqtt_ret = -EIO; },     [] { publish_fail_at = 1; },
+		[] { publish_fail_at = 2; }, [] { flush_ret = -EIO; },
+	};
+
+	for (auto set_failure : fail) {
+		fresh_wake();
+		set_failure();
+
+		plant::CycleResult r = plant::run_cycle(cfg, first_wake, T_ACTIVE_START);
+
+		CHECK(r.error != 0);
+		check_markers_on_phase_boundaries(r);
+	}
+}
+
 int main()
 {
 	test_cycle_runs_the_wake_sequence_in_order();
@@ -400,6 +469,9 @@ int main()
 	test_sntp_failure_publishes_null_timestamps();
 	test_failed_sensors_publish_null_fields();
 	test_rssi_failure_publishes_null_rssi();
+	test_net_init_failure_marks_teardown_and_tears_down();
+	test_markers_fall_on_the_published_phase_boundaries();
+	test_failed_cycle_marks_teardown_where_t_wifi_stops();
 
 	if (failures) {
 		printf("%d failure(s)\n", failures);

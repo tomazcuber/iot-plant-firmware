@@ -7,6 +7,7 @@
 #include <esp_sleep.h>
 #include <esp_system.h>
 
+#include "phase_markers.h"
 #include "sleep.h"
 
 /* LP SRAM (RTC fast memory), which stays powered in deep sleep (the HAL keeps
@@ -39,5 +40,9 @@ FUNC_NORETURN void sleep_for(uint32_t seconds)
 {
 	/* 64-bit microseconds: a 32-bit product overflows after ~71 minutes. */
 	(void)esp_sleep_enable_timer_wakeup((uint64_t)seconds * 1000000ULL);
+	/* Any other wake source (#26) is armed above this line. Releasing the
+	 * markers to `00` ends the Teardown (FR-MA-18, ADR-0009): it is the
+	 * last step before power-off. */
+	phase_markers_set(PHASE_MARKER_NONE);
 	sys_poweroff();
 }

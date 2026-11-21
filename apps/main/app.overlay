@@ -1,0 +1,16 @@
+/* What apps/main alone needs on top of the plant_sensors shield
+ * (NFR-MA-04). The shield's zephyr,user node (io-channels) merges with this
+ * one. */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	zephyr,user {
+		/* Phase markers (FR-MA-18): index 0 = code bit 1 = GPIO18 (to the
+		 * Reader's GPIO6), index 1 = code bit 0 = GPIO19 (to the Reader's
+		 * GPIO7). Same port and active high: phase_markers.c writes both
+		 * in one masked register write. */
+		marker-gpios = <&gpio0 18 GPIO_ACTIVE_HIGH>,
+			       <&gpio0 19 GPIO_ACTIVE_HIGH>;
+	};
+};

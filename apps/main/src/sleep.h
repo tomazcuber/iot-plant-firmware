@@ -27,8 +27,9 @@ struct main_retained *sleep_retained(void);
 /* RTC time in ms. Keeps counting through Sleep; restarts on power-on. */
 int64_t sleep_rtc_ms(void);
 
-/* Arm the RTC timer to wake after `seconds` and enter Sleep. Never returns:
- * the wake is a fresh boot. */
+/* Arm the RTC timer to wake after `seconds`, release the phase markers to
+ * `00` (phase_markers.h) and enter Sleep. Never returns: the wake is a fresh
+ * boot. Call it after every retained-RAM write and log. */
 FUNC_NORETURN void sleep_for(uint32_t seconds);
 
 #ifdef __cplusplus
