@@ -9,6 +9,7 @@
 #ifndef MAIN_RETAINED_H
 #define MAIN_RETAINED_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include <plant/types.h>
@@ -32,6 +33,24 @@ struct main_retained {
 /* RTC ticks to ms with this boot's calibration. Provided by the SoC file
  * (sleep_esp32.c). */
 uint64_t retained_ticks_to_ms(uint64_t ticks);
+
+/* What the SoC's wake-cause register recorded for the Sleep that just ended. */
+enum main_wake_cause {
+	MAIN_WAKE_CAUSE_NONE, /* no source recorded */
+	MAIN_WAKE_CAUSE_TIMER,
+	MAIN_WAKE_CAUSE_EXT1,
+};
+
+/* The Wake reason of a Sleep (ADR-0012). The register can stay empty after a
+ * GPIO6 wake, so soil_pin_latched (GPIO6 both selected and latched in the EXT1
+ * block) decides that case:
+ *
+ *   recorded cause   soil_pin_latched   Wake reason
+ *   EXT1             any                soil alert
+ *   timer            any                timer
+ *   none             yes                soil alert
+ *   none             no                 timer */
+enum plant_wake_reason main_wake_reason(enum main_wake_cause cause, bool soil_pin_latched);
 
 #ifdef __cplusplus
 }

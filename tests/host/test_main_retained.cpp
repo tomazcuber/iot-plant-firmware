@@ -322,6 +322,35 @@ static void test_one_alert_per_dry_spell()
 	CHECK(!plant::soil_wake_next(w, PAST));
 }
 
+/* ADR-0012, bench row 1646: GPIO6 woke the chip after 17.64 s, the wake-cause
+ * register stayed empty, and DO was back to normal when the Cycle read it. The
+ * Cycle is still an alert, with the measured Sleep, followed by timer-only. */
+static void test_empty_wake_cause_with_latched_pin_is_a_soil_alert()
+{
+	main_retained rs = record_of_sleep(true);
+
+	ticks_per_ms = 2;
+	plant::WakeState w = plant::retained_on_wake(
+		rs, true, main_wake_reason(MAIN_WAKE_CAUSE_NONE, true), 5000 + 35280);
+
+	CHECK(w.wake_reason == PLANT_WAKE_SOIL_MOISTURE_ALERT);
+	CHECK(w.t_sleep_valid);
+	CHECK(w.t_sleep_ms == 17640);
+	CHECK(!plant::soil_wake_next(w, NORMAL));
+}
+
+/* The fallback applies only to an empty cause. A recorded timer stays a timer
+ * wake even with GPIO6 latched (bench row 1651: both fired after a full Sleep),
+ * and an empty cause with nothing latched is not an alert. */
+static void test_wake_reason_table()
+{
+	CHECK(main_wake_reason(MAIN_WAKE_CAUSE_EXT1, true) == PLANT_WAKE_SOIL_MOISTURE_ALERT);
+	CHECK(main_wake_reason(MAIN_WAKE_CAUSE_EXT1, false) == PLANT_WAKE_SOIL_MOISTURE_ALERT);
+	CHECK(main_wake_reason(MAIN_WAKE_CAUSE_TIMER, true) == PLANT_WAKE_TIMER);
+	CHECK(main_wake_reason(MAIN_WAKE_CAUSE_TIMER, false) == PLANT_WAKE_TIMER);
+	CHECK(main_wake_reason(MAIN_WAKE_CAUSE_NONE, false) == PLANT_WAKE_TIMER);
+}
+
 int main()
 {
 	test_first_boot_starts_at_zero_with_null_t_sleep();
@@ -341,6 +370,8 @@ int main()
 	test_first_boot_arms_only_on_the_normal_side();
 	test_unusable_record_does_not_count_as_armed();
 	test_one_alert_per_dry_spell();
+	test_empty_wake_cause_with_latched_pin_is_a_soil_alert();
+	test_wake_reason_table();
 
 	if (failures) {
 		printf("%d failure(s)\n", failures);

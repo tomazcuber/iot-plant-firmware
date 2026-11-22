@@ -21,7 +21,9 @@ extern "C" {
 bool sleep_woke(void);
 
 /* What ended the Sleep: PLANT_WAKE_SOIL_MOISTURE_ALERT when the GPIO6 wake
- * fired, otherwise PLANT_WAKE_TIMER (also on a boot that is no wake). */
+ * fired, otherwise PLANT_WAKE_TIMER (also on a boot that is no wake). Call it
+ * before sleep_soil_past_threshold(), which clears the EXT1 state it reads
+ * (ADR-0012). */
 enum plant_wake_reason sleep_wake_reason(void);
 
 /* The struct that survives Sleep (retained.h), in LP SRAM. Its content is

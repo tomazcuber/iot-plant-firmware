@@ -1,5 +1,13 @@
 #include "retained.h"
 
+enum plant_wake_reason main_wake_reason(enum main_wake_cause cause, bool soil_pin_latched)
+{
+	if (cause == MAIN_WAKE_CAUSE_EXT1 || (cause == MAIN_WAKE_CAUSE_NONE && soil_pin_latched)) {
+		return PLANT_WAKE_SOIL_MOISTURE_ALERT;
+	}
+	return PLANT_WAKE_TIMER;
+}
+
 namespace plant {
 
 WakeState retained_on_wake(main_retained &rs, bool woke_from_sleep, plant_wake_reason wake_reason,

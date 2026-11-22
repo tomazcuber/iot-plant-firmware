@@ -13,6 +13,7 @@
 #include <esp_private/sleep_gpio.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
+#include <hal/lp_aon_ll.h>
 #include <soc/rtc.h>
 #include <soc/soc_caps.h>
 
@@ -48,9 +49,24 @@ enum plant_wake_reason sleep_wake_reason(void)
 	/* GPIO6 is the only EXT1 source. If the timer fired too, the HAL
 	 * reports the timer; the wake stays armed and fires on the next Sleep
 	 * if DO is still asserted. */
-	return esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1
-		       ? PLANT_WAKE_SOIL_MOISTURE_ALERT
-		       : PLANT_WAKE_TIMER;
+	const esp_sleep_wakeup_cause_t hal_cause = esp_sleep_get_wakeup_cause();
+	enum main_wake_cause cause = MAIN_WAKE_CAUSE_NONE;
+
+	if (hal_cause == ESP_SLEEP_WAKEUP_TIMER) {
+		cause = MAIN_WAKE_CAUSE_TIMER;
+	} else if (hal_cause == ESP_SLEEP_WAKEUP_EXT1) {
+		cause = MAIN_WAKE_CAUSE_EXT1;
+	}
+
+	/* The cause register can stay empty after a GPIO6 wake (ADR-0012). The
+	 * latch alone is stale after a timer-only Sleep, so the pin must also
+	 * still be selected; the pad-hold release in
+	 * sleep_soil_past_threshold() clears that selection. LP IO numbers
+	 * equal GPIO numbers on this SoC. */
+	const uint32_t latched = lp_aon_ll_ext1_get_wakeup_pins() &
+				 lp_aon_ll_ext1_get_wakeup_status();
+
+	return main_wake_reason(cause, (latched & BIT(soil_alert.pin)) != 0);
 }
 
 struct main_retained *sleep_retained(void)
